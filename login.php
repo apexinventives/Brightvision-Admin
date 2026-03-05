@@ -1,7 +1,6 @@
 <?php
 require_once 'config/database.php';
 require_once 'config/session.php';
-session_start();
 
 if (isset($_SESSION['user_id'])) {
     header('Location: index.php');
