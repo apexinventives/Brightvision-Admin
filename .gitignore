@@ -1,1 +1,13 @@
+# Config
+config.php
+.env
 
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+/vendor/
