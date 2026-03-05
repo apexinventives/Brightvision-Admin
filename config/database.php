@@ -1,8 +1,8 @@
 <?php
 // Database configuration
 define('DB_HOST', 'localhost');
-define('DB_USER', 'brightvi_root');
-define('DB_PASS', 'Art@dalvik197');
+define('DB_USER', 'root');
+define('DB_PASS', '');
 define('DB_NAME', 'brightvi_BVMain');
 
 // Create connection
