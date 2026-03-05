@@ -1,0 +1,47 @@
+2026-03-02 13:16:32 | ID: 677 | Phone: 0714665089 | Status: Sent | Response: <!DOCTYPE html>
+<html style="height:100%">
+<head>
+<meta name="viewport" content="width=device-width,
+2026-03-02 13:20:42 | ID: 677 | Phone: 0714018154 | Status: Sent | Response: {"status":"success","id":"42969a58eaa05d92721"}
+2026-03-02 13:30:32 | ID: 677 | Phone: 0714018154 | Status: Sent | Response: {"status":"success","id":"42969a590f83214a721"}
+2026-03-02 13:33:12 | ID: 677 | Phone: 0714665089 | Status: Sent | Response: {"status":"success","id":"42969a59197ea891721"}
+2026-03-02 13:33:23 | ID: 647 | Phone: 0764591237 | Status: Sent | Response: {"status":"success","id":"42969a591a3b8966721"}
+2026-03-02 13:33:31 | ID: 686 | Phone: 0751201009 | Status: Sent | Response: {"status":"success","id":"42969a591ab653ab721"}
+2026-03-02 13:33:37 | ID: 683 | Phone: 0781047245 | Status: Sent | Response: {"status":"success","id":"42969a591b0d6ea2721"}
+2026-03-02 13:33:45 | ID: 684 | Phone: 0743812640 | Status: Sent | Response: {"status":"success","id":"42969a591b953434721"}
+2026-03-02 13:33:50 | ID: 687 | Phone: 0712905848 | Status: Sent | Response: {"status":"success","id":"42969a591bdddc55721"}
+2026-03-02 13:33:55 | ID: 679 | Phone: 0760791946 | Status: Sent | Response: {"status":"success","id":"42969a591c343be3721"}
+2026-03-02 13:34:00 | ID: 680 | Phone: 0766700814 | Status: Sent | Response: {"status":"success","id":"42969a591c88799e721"}
+2026-03-02 13:34:11 | ID: 685 | Phone: 0755878404 | Status: Sent | Response: {"status":"success","id":"42969a591d324ef7721"}
+2026-03-02 13:34:16 | ID: 664 | Phone: 0777230161 | Status: Sent | Response: {"status":"success","id":"42969a591d880b3a721"}
+2026-03-02 13:34:24 | ID: 669 | Phone: 0764345917 | Status: Sent | Response: {"status":"success","id":"42969a591e02a218721"}
+2026-03-02 13:34:31 | ID: 654 | Phone: 0781047248 | Status: Sent | Response: {"status":"success","id":"42969a591e7bc7d4721"}
+2026-03-02 13:34:38 | ID: 656 | Phone: 0757328807 | Status: Sent | Response: {"status":"success","id":"42969a591ee01b96721"}
+2026-03-02 13:34:47 | ID: 668 | Phone: 0774884200 | Status: Sent | Response: {"status":"success","id":"42969a591f75f64b721"}
+2026-03-02 13:34:54 | ID: 676 | Phone: 0784648513 | Status: Sent | Response: {"status":"success","id":"42969a591fdd4f02721"}
+2026-03-02 13:35:01 | ID: 660 | Phone: 0711301886 | Status: Sent | Response: {"status":"success","id":"42969a59204e818e721"}
+2026-03-02 13:35:09 | ID: 678 | Phone: 0764798390 | Status: Sent | Response: {"status":"success","id":"42969a5920d6586a721"}
+2026-03-02 13:35:19 | ID: 681 | Phone: 0753667516 | Status: Sent | Response: {"status":"success","id":"42969a5921796fe4721"}
+2026-03-02 13:35:26 | ID: 682 | Phone: 0714288820 | Status: Sent | Response: {"status":"success","id":"42969a5921e6eff1721"}
+2026-03-02 13:35:35 | ID: 670 | Phone: 0703580112 | Status: Sent | Response: {"status":"success","id":"42969a5922703833721"}
+2026-03-02 13:35:50 | ID: 671 | Phone: 0763418906 | Status: Sent | Response: {"status":"success","id":"42969a59236155ff721"}
+2026-03-02 13:36:07 | ID: 673 | Phone: 0784607421 | Status: Sent | Response: {"status":"success","id":"42969a59247b33eb721"}
+2026-03-02 13:36:16 | ID: 665 | Phone: 0766707463 | Status: Sent | Response: {"status":"success","id":"42969a592503f320721"}
+2026-03-02 13:36:23 | ID: 667 | Phone: 0752042588 | Status: Sent | Response: {"status":"success","id":"42969a592575f6a1721"}
+2026-03-02 13:36:31 | ID: 674 | Phone: 0765644463 | Status: Sent | Response: {"status":"success","id":"42969a5925f2eb25721"}
+2026-03-02 13:36:39 | ID: 659 | Phone: 0743534132 | Status: Sent | Response: {"status":"success","id":"42969a5926701857721"}
+2026-03-02 13:36:50 | ID: 662 | Phone: 0704916493 | Status: Sent | Response: {"status":"success","id":"42969a5927204488721"}
+2026-03-02 13:36:58 | ID: 648 | Phone: 0704039765 | Status: Sent | Response: {"status":"success","id":"42969a59279d310e721"}
+2026-03-02 13:37:06 | ID: 649 | Phone: 0776739308 | Status: Sent | Response: {"status":"success","id":"42969a59281db31e721"}
+2026-03-02 13:37:13 | ID: 651 | Phone: 0755715719 | Status: Sent | Response: {"status":"success","id":"42969a592892d97c721"}
+2026-03-02 13:37:23 | ID: 652 | Phone: 0757765129 | Status: Sent | Response: {"status":"success","id":"42969a592939d888721"}
+2026-03-02 13:37:32 | ID: 653 | Phone: 0778936382 | Status: Sent | Response: {"status":"success","id":"42969a5929cb207a721"}
+2026-03-02 13:37:41 | ID: 655 | Phone: 0759392097 | Status: Sent | Response: {"status":"success","id":"42969a592a5cc6e1721"}
+2026-03-02 13:37:51 | ID: 661 | Phone: 0769245112 | Status: Sent | Response: {"status":"success","id":"42969a592af6cc17721"}
+2026-03-02 13:38:04 | ID: 657 | Phone: 0711643983 | Status: Sent | Response: {"status":"success","id":"42969a592bc0b047721"}
+2026-03-02 13:38:13 | ID: 663 | Phone: 0751815205 | Status: Sent | Response: {"status":"success","id":"42969a592c563734721"}
+2026-03-02 13:39:13 | ID: 666 | Phone: 0751831601 | Status: Sent | Response: {"status":"success","id":"42969a59301cb459721"}
+2026-03-02 13:39:23 | ID: 650 | Phone: 0760088205 | Status: Sent | Response: {"status":"success","id":"42969a5930b9c7b8721"}
+2026-03-02 13:41:53 | ID: 672 | Phone: 0706113333 | Status: Sent | Response: {"status":"success","id":"42969a593a12db9d721"}
+2026-03-02 13:41:58 | ID: 658 | Phone: 0701550629 | Status: Sent | Response: {"status":"success","id":"42969a593a6be193721"}
+2026-03-02 13:42:09 | ID: 675 | Phone: 0763176111 | Status: Sent | Response: {"status":"success","id":"42969a593b179af6721"}
