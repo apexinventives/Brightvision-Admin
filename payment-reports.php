@@ -2,6 +2,7 @@
 require_once 'config/session.php';
 require_once 'config/database.php';
 require_once 'includes/simple-pdf.php';
+require_once 'includes/payment-method-summary.php';
 redirectIfNotLoggedIn();
 
 $conn = getConnection();
@@ -12,6 +13,8 @@ $status = $_GET['status'] ?? '';
 $dateFrom = $_GET['date_from'] ?? '';
 $dateTo = $_GET['date_to'] ?? '';
 $format = $_GET['format'] ?? '';
+$method = $_GET['method'] ?? '';
+if (!is_string($method) || !isset($methodLabels[$method])) $method = '';
 if (!in_array($status, ['', 'paid', 'pending', 'overdue'], true)) $status = '';
 if ($dateFrom && !DateTime::createFromFormat('Y-m-d', $dateFrom)) $dateFrom = '';
 if ($dateTo && !DateTime::createFromFormat('Y-m-d', $dateTo)) $dateTo = '';
@@ -26,6 +29,7 @@ if ($search !== '') {
     $types .= 'ssss';
 }
 if ($courseId) { $where[] = 'p.course_id = ?'; $params[] = $courseId; $types .= 'i'; }
+if ($method !== '') { $where[] = 'p.payment_method = ?'; $params[] = $method; $types .= 's'; }
 if ($dateFrom) { $where[] = 'DATE(p.created_at) >= ?'; $params[] = $dateFrom; $types .= 's'; }
 if ($dateTo) { $where[] = 'DATE(p.created_at) <= ?'; $params[] = $dateTo; $types .= 's'; }
 if ($status === 'paid') $where[] = 'NOT EXISTS (SELECT 1 FROM payment_installments x WHERE x.payment_plan_id = p.id AND x.is_paid = 0)';
@@ -57,6 +61,8 @@ foreach ($rows as &$row) {
     $summary['balance'] += $row['balance'];
 }
 unset($row);
+$methodSummary = summarizePaymentMethods($rows, $methodLabels);
+$summary['methods'] = $methodSummary;
 
 $filterParts = [];
 if ($search) $filterParts[] = 'Search: ' . $search;
@@ -66,11 +72,22 @@ if ($courseId) {
     $filterParts[] = 'Course: ' . $courseFilterLabel;
 }
 if ($status) $filterParts[] = 'Status: ' . ucfirst($status);
+if ($method) $filterParts[] = 'Method: ' . $methodLabels[$method];
 if ($dateFrom) $filterParts[] = 'From: ' . $dateFrom;
 if ($dateTo) $filterParts[] = 'To: ' . $dateTo;
 $filterDescription = $filterParts ? implode(' | ', $filterParts) : 'All payment records';
 $filenameDate = date('Y-m-d');
 
+if ($format === 'method_csv') {
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="payment-method-report-' . $filenameDate . '.csv"');
+    $output = fopen('php://output', 'w');
+    fwrite($output, "\xEF\xBB\xBF");
+    fputcsv($output, ['Payment Method', 'Payment Plans', 'Students (unique IDs)', 'Total Amount', 'Collected', 'Outstanding']);
+    foreach ($methodSummary as $item) fputcsv($output, [$item['label'], $item['plans'], $item['students'], number_format($item['total'], 2, '.', ''), number_format($item['paid'], 2, '.', ''), number_format($item['balance'], 2, '.', '')]);
+    fclose($output);
+    exit;
+}
 if ($format === 'csv') {
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="payment-report-' . $filenameDate . '.csv"');
@@ -94,7 +111,7 @@ if ($format === 'pdf') {
 
 $courses = $conn->query("SELECT id, course_number, course_name FROM payment_courses ORDER BY course_name")->fetch_all(MYSQLI_ASSOC);
 $exportParams = array_filter(
-    ['search' => $search, 'course_id' => $courseId, 'status' => $status, 'date_from' => $dateFrom, 'date_to' => $dateTo],
+    ['search' => $search, 'course_id' => $courseId, 'status' => $status, 'method' => $method, 'date_from' => $dateFrom, 'date_to' => $dateTo],
     function ($value) { return $value !== '' && $value !== 0; }
 );
 include 'includes/header.php';
@@ -111,6 +128,7 @@ include 'includes/sidebar.php';
     <form method="GET" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Search</label><input name="search" value="<?php echo htmlspecialchars($search); ?>" class="w-full border rounded-lg px-3 py-2" placeholder="Student or course"></div>
+            <div><label class="block text-sm font-medium text-gray-700 mb-2">Payment Method</label><select name="method" class="w-full border rounded-lg px-3 py-2 bg-white"><option value="">All methods</option><?php foreach ($methodLabels as $key => $label): ?><option value="<?php echo $key; ?>" <?php echo $method === $key ? 'selected' : ''; ?>><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Course</label><select name="course_id" class="w-full border rounded-lg px-3 py-2 bg-white"><option value="">All courses</option><?php foreach ($courses as $course): ?><option value="<?php echo (int)$course['id']; ?>" <?php echo $courseId === (int)$course['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($course['course_number'] . ' - ' . $course['course_name']); ?></option><?php endforeach; ?></select></div>
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Status</label><select name="status" class="w-full border rounded-lg px-3 py-2 bg-white"><option value="">All statuses</option><option value="paid" <?php echo $status === 'paid' ? 'selected' : ''; ?>>Paid</option><option value="pending" <?php echo $status === 'pending' ? 'selected' : ''; ?>>Pending</option><option value="overdue" <?php echo $status === 'overdue' ? 'selected' : ''; ?>>Overdue</option></select></div>
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Created From</label><input type="date" name="date_from" value="<?php echo htmlspecialchars($dateFrom); ?>" class="w-full border rounded-lg px-3 py-2"></div>
@@ -124,6 +142,15 @@ include 'includes/sidebar.php';
         <div class="bg-white shadow rounded-xl p-5 border-l-4 border-green-500"><p class="text-sm text-gray-500">Collected</p><p class="text-2xl font-bold text-green-700">Rs. <?php echo number_format($summary['paid'], 2); ?></p></div>
         <div class="bg-white shadow rounded-xl p-5 border-l-4 border-orange-500"><p class="text-sm text-gray-500">Outstanding</p><p class="text-2xl font-bold text-orange-700">Rs. <?php echo number_format($summary['balance'], 2); ?></p></div>
     </div>
+    <section class="bg-white rounded-xl shadow-md overflow-hidden mb-6">
+        <div class="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div><h2 class="text-xl font-semibold text-gray-800">Payment Method Report</h2><p class="text-sm text-gray-500 mt-1">Counts and amounts follow the selected filters. Students are counted by unique student ID within each method.</p></div>
+            <a href="?<?php echo htmlspecialchars(http_build_query($exportParams + ['format' => 'method_csv'])); ?>" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-center whitespace-nowrap">Export Method CSV</a>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full min-w-[700px] text-sm"><thead class="bg-gray-50 text-gray-500"><tr><th class="text-left px-5 py-3">Method</th><th class="text-right px-5 py-3">Payment Plans</th><th class="text-right px-5 py-3">Students</th><th class="text-right px-5 py-3">Total (Rs.)</th><th class="text-right px-5 py-3">Collected (Rs.)</th><th class="text-right px-5 py-3">Outstanding (Rs.)</th></tr></thead><tbody class="divide-y">
+            <?php foreach ($methodSummary as $item): ?><tr><td class="px-5 py-3 font-medium"><?php echo htmlspecialchars($item['label']); ?></td><td class="px-5 py-3 text-right"><?php echo $item['plans']; ?></td><td class="px-5 py-3 text-right"><?php echo $item['students']; ?></td><td class="px-5 py-3 text-right"><?php echo number_format($item['total'], 2); ?></td><td class="px-5 py-3 text-right text-green-700"><?php echo number_format($item['paid'], 2); ?></td><td class="px-5 py-3 text-right text-orange-700"><?php echo number_format($item['balance'], 2); ?></td></tr><?php endforeach; ?>
+        </tbody></table></div>
+    </section>
     <div class="bg-white rounded-xl shadow-md overflow-hidden">
         <div class="overflow-x-auto"><table class="w-full min-w-[1050px]"><thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="text-left px-5 py-3">Student</th><th class="text-left px-5 py-3">Course</th><th class="text-left px-5 py-3">Method</th><th class="text-right px-5 py-3">Total</th><th class="text-right px-5 py-3">Paid</th><th class="text-right px-5 py-3">Balance</th><th class="text-left px-5 py-3">Progress</th><th class="text-left px-5 py-3">Next Date</th><th class="text-left px-5 py-3">Status</th></tr></thead><tbody class="divide-y">
         <?php if (!$rows): ?><tr><td colspan="9" class="px-6 py-12 text-center text-gray-500">No payment records match these filters.</td></tr><?php endif; ?>

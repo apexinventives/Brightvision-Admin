@@ -1,9 +1,20 @@
 <?php
 require_once 'config/session.php';
 require_once 'config/database.php';
+require_once 'includes/payment-amounts.php';
+require_once 'includes/payment-method-summary.php';
 redirectIfNotLoggedIn();
 
 $conn = getConnection();
+$conn->query("CREATE TABLE IF NOT EXISTS payment_amount_settings (
+    id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+    full_amount DECIMAL(12,2) NOT NULL,
+    half_first DECIMAL(12,2) NOT NULL,
+    half_second DECIMAL(12,2) NOT NULL,
+    quarter_each DECIMAL(12,2) NOT NULL
+) ENGINE=InnoDB");
+$amountDefaults = ['full_amount' => 30000, 'half_first' => 20000, 'half_second' => 13000, 'quarter_each' => 11000];
+$amountSettings = $conn->query('SELECT full_amount, half_first, half_second, quarter_each FROM payment_amount_settings WHERE id = 1')->fetch_assoc() ?: $amountDefaults;
 $methodInstallments = [
     'full' => 1,
     'half' => 2,
@@ -34,7 +45,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $action = $_POST['action'] ?? 'create';
 
-        if ($action === 'delete_payment') {
+        if ($action === 'save_amount_settings') {
+            $newAmounts = [];
+            foreach ($amountDefaults as $key => $default) {
+                $value = filter_var($_POST[$key] ?? '', FILTER_VALIDATE_FLOAT);
+                if ($value === false || !is_finite((float)$value) || $value < 0 || $value > 9999999999.99 || abs($value - round($value, 2)) > 0.00001) {
+                    $errors[] = 'Enter valid amounts with up to two decimal places.';
+                    break;
+                }
+                $newAmounts[$key] = round($value, 2);
+            }
+            if (!$errors && ($newAmounts['half_first'] + $newAmounts['half_second'] > 9999999999.99 || $newAmounts['quarter_each'] * 3 > 9999999999.99)) $errors[] = 'The installment total is too large.';
+            if (!$errors) {
+                $conn->begin_transaction();
+                try {
+                    $stmt = $conn->prepare('INSERT INTO payment_amount_settings (id, full_amount, half_first, half_second, quarter_each) VALUES (1, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE full_amount = VALUES(full_amount), half_first = VALUES(half_first), half_second = VALUES(half_second), quarter_each = VALUES(quarter_each)');
+                    $stmt->bind_param('dddd', $newAmounts['full_amount'], $newAmounts['half_first'], $newAmounts['half_second'], $newAmounts['quarter_each']);
+                    if (!$stmt->execute()) throw new RuntimeException('Could not save central payment amounts.');
+                    $stmt->close();
+                    $updatedPlans = updateStudentPaymentAmounts($conn, $newAmounts);
+                    $conn->commit();
+                    $_SESSION['payment_success'] = 'Central payment amounts saved and student payments updated (' . $updatedPlans . ' total(s) changed).';
+                    header('Location: payments.php#payment-amount-settings');
+                    exit;
+                } catch (Throwable $e) {
+                    $conn->rollback();
+                    error_log('Payment amount settings failed: ' . $e->getMessage());
+                    $errors[] = 'Payment amount settings could not be saved. Please try again.';
+                }
+            }
+        } elseif ($action === 'delete_payment') {
             $planId = filter_input(INPUT_POST, 'payment_plan_id', FILTER_VALIDATE_INT);
             if (!$planId) {
                 $errors[] = 'Invalid payment record.';
@@ -69,6 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $studentName = trim($_POST['student_name'] ?? '');
             $studentIdNumber = trim($_POST['student_id_number'] ?? '');
             $totalAmount = filter_var($_POST['total_amount'] ?? '', FILTER_VALIDATE_FLOAT);
+            $paymentMethod = $_POST['payment_method'] ?? '';
+            if (!isset($methodInstallments[$paymentMethod])) $errors[] = 'Select a valid payment method.';
+            if (in_array($paymentMethod, ['scholarship', 'free_card'], true)) $totalAmount = 0.00;
             if (!$planId) $errors[] = 'Invalid payment record.';
             if ($studentName === '' || mb_strlen($studentName) > 255) $errors[] = 'Enter a student name of up to 255 characters.';
             if ($studentIdNumber === '' || mb_strlen($studentIdNumber) > 50) $errors[] = 'Enter a student ID of up to 50 characters.';
@@ -82,10 +125,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $currentPlan = $currentStmt->get_result()->fetch_assoc();
                     $currentStmt->close();
                     if (!$currentPlan) throw new RuntimeException('Payment record no longer exists.');
-                    if (in_array($currentPlan['payment_method'], ['scholarship', 'free_card'], true) && $totalAmount != 0) {
-                        throw new InvalidArgumentException('Scholarship and Free Card amounts must remain zero.');
-                    }
-                    if (round((float)$currentPlan['total_amount'] * 100) !== round($totalAmount * 100)) {
+                    if ($paymentMethod !== $currentPlan['payment_method']) {
+                        updatePaymentMethodSchedule($conn, $planId, $paymentMethod, $totalAmount, $amountSettings);
+                    } elseif (round((float)$currentPlan['total_amount'] * 100) !== round($totalAmount * 100)) {
                         $itemsStmt = $conn->prepare('SELECT id, amount FROM payment_installments WHERE payment_plan_id = ? ORDER BY installment_number FOR UPDATE');
                         $itemsStmt->bind_param('i', $planId);
                         $itemsStmt->execute();
@@ -113,12 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $foundStudent = $lookup->get_result()->fetch_assoc();
                     if ($foundStudent) $studentUserId = (int)$foundStudent['id'];
                     $lookup->close();
-                    $stmt = $conn->prepare("UPDATE payment_plans SET student_name = ?, student_id_number = ?, student_user_id = ?, total_amount = ? WHERE id = ?");
-                    $stmt->bind_param('ssidi', $studentName, $studentIdNumber, $studentUserId, $totalAmount, $planId);
-                    $stmt->execute();
+                    $stmt = $conn->prepare("UPDATE payment_plans SET student_name = ?, student_id_number = ?, student_user_id = ?, total_amount = ?, payment_method = ? WHERE id = ?");
+                    $stmt->bind_param('ssidsi', $studentName, $studentIdNumber, $studentUserId, $totalAmount, $paymentMethod, $planId);
+                    if (!$stmt->execute()) throw new RuntimeException('Could not save payment details.');
                     $stmt->close();
                     $conn->commit();
-                    $_SESSION['payment_success'] = 'Student details and payment amount saved successfully.';
+                    $_SESSION['payment_success'] = 'Student details, payment method and amount saved successfully.';
                     $returnQuery = trim($_POST['return_query'] ?? '');
                     header('Location: payments.php' . ($returnQuery !== '' ? '?' . $returnQuery : '') . '#payment-plan-' . $planId);
                     exit;
@@ -338,6 +380,7 @@ $plans = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
 // Compare number groups naturally: 2, 10, 110 and BV-2, BV-10, BV-110.
+$methodCounts = summarizePaymentMethods($plans, $methodLabels);
 if (in_array($sort, ['student_id', 'course'], true)) {
     $sortField = $sort === 'student_id' ? 'student_id_number' : 'course_number';
     usort($plans, static function ($left, $right) use ($sortField, $direction) {
@@ -387,6 +430,33 @@ include 'includes/sidebar.php';
             <ul class="list-disc ml-5"><?php foreach ($errors as $error): ?><li><?php echo htmlspecialchars($error); ?></li><?php endforeach; ?></ul>
         </div>
     <?php endif; ?>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+        <?php foreach ($methodCounts as $key => $item): ?>
+            <a href="payment-reports.php?<?php echo htmlspecialchars(http_build_query(['method' => $key, 'search' => $search, 'status' => $status])); ?>" class="bg-white rounded-xl shadow p-4 hover:bg-blue-50">
+                <p class="text-sm text-gray-500"><?php echo htmlspecialchars($item['label']); ?></p><p class="text-2xl font-bold text-gray-800"><?php echo $item['plans']; ?></p><p class="text-xs text-gray-500">Payment plans · View report</p>
+            </a>
+        <?php endforeach; ?>
+    </div>
+    <p class="text-xs text-gray-500 mb-6">Method counts follow the payment records search and status filters.</p>
+
+    <section id="payment-amount-settings" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6 scroll-mt-6">
+        <h2 class="text-xl font-semibold text-gray-800">Central Payment Amounts</h2>
+        <p class="text-sm text-gray-500 mt-1 mb-4">Customize amounts here for all courses. Saving updates existing student totals and installments, including paid installments and individually edited amounts. Dates and paid status stay the same.</p>
+        <form method="POST" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
+            <input type="hidden" name="action" value="save_amount_settings">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <?php foreach (['full_amount' => 'Full payment (Rs.)', 'half_first' => 'Half: first payment (Rs.)', 'half_second' => 'Half: second payment (Rs.)', 'quarter_each' => 'Quarter: each of 3 payments (Rs.)'] as $key => $label): ?>
+                    <label class="block text-sm font-medium text-gray-700"><?php echo htmlspecialchars($label); ?>
+                        <input type="number" name="<?php echo $key; ?>" min="0" max="9999999999.99" step="0.01" required value="<?php echo htmlspecialchars((string)(($_POST['action'] ?? '') === 'save_amount_settings' ? ($_POST[$key] ?? '') : $amountSettings[$key])); ?>" class="mt-2 w-full border rounded-lg px-3 py-2.5">
+                    </label>
+                <?php endforeach; ?>
+            </div>
+            <p class="text-sm text-gray-500">Half total: Rs. <?php echo number_format($amountSettings['half_first'] + $amountSettings['half_second'], 2); ?> · Quarter total: Rs. <?php echo number_format($amountSettings['quarter_each'] * 3, 2); ?></p>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg">Save &amp; Update Student Payments</button>
+        </form>
+    </section>
 
     <section class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -568,10 +638,18 @@ include 'includes/sidebar.php';
                                         <label class="block text-xs font-medium text-gray-700">Student ID
                                             <input name="student_id_number" required maxlength="50" value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['student_id_number'] ?? '') : $plan['student_id_number']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
                                         </label>
-                                        <label class="block text-xs font-medium text-gray-700">Total Amount (Rs.)
-                                            <input type="number" name="total_amount" required min="0" max="9999999999.99" step="0.01" <?php echo in_array($plan['payment_method'], ['scholarship', 'free_card'], true) ? 'readonly' : ''; ?> value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['total_amount'] ?? '') : $plan['total_amount']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
+                                        <?php $editMethod = $editingThisPlan ? ($_POST['payment_method'] ?? $plan['payment_method']) : $plan['payment_method']; ?>
+                                        <label class="block text-xs font-medium text-gray-700">Payment Method
+                                            <select name="payment_method" required class="edit-payment-method mt-1 w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                                                <?php foreach ($methodLabels as $value => $label): ?>
+                                                    <option value="<?php echo $value; ?>" <?php echo $editMethod === $value ? 'selected' : ''; ?>><?php echo htmlspecialchars($label); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
                                         </label>
-                                        <p class="text-xs text-gray-500">Changing the total adjusts all installment amounts proportionally, including paid installments. Dates and paid status stay the same. Scholarship and Free Card amounts remain zero.</p>
+                                        <label class="block text-xs font-medium text-gray-700">Total Amount (Rs.)
+                                            <input type="number" name="total_amount" required min="0" max="9999999999.99" step="0.01" <?php echo in_array($editMethod, ['scholarship', 'free_card'], true) ? 'readonly' : ''; ?> value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['total_amount'] ?? '') : $plan['total_amount']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
+                                        </label>
+                                        <p class="text-xs text-gray-500">Changing the method fills the central amount and changes the schedule to 1, 2, or 3 payments. Existing installment dates and paid status are kept where possible; new installments start unpaid. Paid installments cannot be removed. Scholarship and Free Card amounts are zero.</p>
                                         <div class="flex justify-end gap-2 pt-2">
                                             <button type="button" onclick="this.closest('dialog').close()" class="text-gray-600 px-3 py-2 text-sm">Cancel</button>
                                             <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">Save Changes</button>
@@ -611,14 +689,24 @@ include 'includes/sidebar.php';
     text-align: left;
 }
 .payment-edit-dialog form { min-width: 0; }
-.payment-edit-dialog input { display: block; min-width: 0; max-width: 100%; }
+.payment-edit-dialog input, .payment-edit-dialog select { display: block; min-width: 0; max-width: 100%; }
 .payment-edit-dialog h2 { min-width: 0; }
 .payment-edit-dialog button { flex-shrink: 0; }
 .payment-edit-dialog::backdrop { background: rgba(15, 23, 42, 0.55); }
 </style>
 <script>
 (() => {
+    const amountSettings = <?php echo json_encode(array_map('floatval', $amountSettings)); ?>;
+    const schedules = {full: [amountSettings.full_amount], half: [amountSettings.half_first, amountSettings.half_second], quarter: Array(3).fill(amountSettings.quarter_each), scholarship: [0], free_card: [0]};
+    const submittedSchedule = <?php echo json_encode(($_POST['action'] ?? '') === 'create' ? ['dates' => $_POST['installment_date'] ?? [], 'amounts' => $_POST['installment_amount'] ?? [], 'paid' => (object)($_POST['installment_paid'] ?? [])] : null, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     document.querySelectorAll('.payment-edit-dialog').forEach(dialog => {
+        const editMethod = dialog.querySelector('.edit-payment-method');
+        const editTotal = dialog.querySelector('input[name="total_amount"]');
+        editMethod.addEventListener('change', () => {
+            editTotal.value = schedules[editMethod.value].reduce((sum, amount) => sum + amount, 0).toFixed(2);
+            editTotal.readOnly = ['scholarship', 'free_card'].includes(editMethod.value);
+            editTotal.classList.toggle('bg-gray-100', editTotal.readOnly);
+        });
         dialog.addEventListener('click', event => {
             const bounds = dialog.getBoundingClientRect();
             if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
@@ -637,29 +725,41 @@ include 'includes/sidebar.php';
         const date = new Date(); date.setMonth(date.getMonth() + offsetMonths);
         return date.toLocaleDateString('en-CA');
     }
-    function renderSchedule() {
+    function renderSchedule(useDefaults = false) {
         const selected = method.value;
         const count = counts[selected] || 0;
         const free = selected === 'scholarship' || selected === 'free_card';
+        if (useDefaults && schedules[selected]) total.value = schedules[selected].reduce((sum, amount) => sum + amount, 0).toFixed(2);
         total.readOnly = free;
         total.classList.toggle('bg-gray-100', free);
         if (free) total.value = '0.00';
-        amountHelp.textContent = free ? 'No payment is charged for this method.' : 'Enter the complete course/payment amount.';
+        amountHelp.textContent = free ? 'No payment is charged for this method.' : 'Filled from Central Payment Amounts. You can adjust this plan if needed.';
         section.classList.toggle('hidden', !count);
         if (!count) { rows.innerHTML = ''; return; }
         const value = Math.max(0, parseFloat(total.value) || 0);
-        const base = Math.floor((value / count) * 100) / 100;
+        const weights = schedules[selected];
+        const weightTotal = weights.reduce((sum, amount) => sum + amount, 0);
+        let remaining = Math.round(value * 100);
+        const previous = [...rows.children].map(row => ({date: row.querySelector('input[type="date"]').value, paid: row.querySelector('input[type="checkbox"]').checked}));
         rows.innerHTML = Array.from({length: count}, (_, index) => {
-            const amount = index === count - 1 ? (value - base * (count - 1)).toFixed(2) : base.toFixed(2);
+            const cents = index === count - 1 ? remaining : Math.floor(Math.round(value * 100) * (weightTotal ? weights[index] / weightTotal : 1 / count));
+            remaining -= cents;
+            const amount = (cents / 100).toFixed(2);
             return `<div class="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end rounded-lg bg-gray-50 border p-4">
                 <div><label class="block text-xs font-medium text-gray-600 mb-1">Payment ${index + 1} date</label><input type="date" name="installment_date[]" required value="${localDate(index)}" class="w-full border rounded-lg px-3 py-2 bg-white"></div>
                 <div><label class="block text-xs font-medium text-gray-600 mb-1">Amount</label><input type="number" name="installment_amount[]" required min="0" step="0.01" value="${amount}" class="w-full border rounded-lg px-3 py-2 bg-white"></div>
                 <label class="flex items-center gap-2 text-sm pb-2"><input type="checkbox" name="installment_paid[${index}]" value="1" class="rounded text-blue-600">Received</label>
             </div>`;
         }).join('');
+        if (!useDefaults) [...rows.children].forEach((row, index) => {
+            if (previous[index]) {
+                row.querySelector('input[type="date"]').value = previous[index].date;
+                row.querySelector('input[type="checkbox"]').checked = previous[index].paid;
+            }
+        });
     }
-    method.addEventListener('change', renderSchedule);
-    total.addEventListener('input', renderSchedule);
+    method.addEventListener('change', () => renderSchedule(true));
+    total.addEventListener('input', () => renderSchedule(false));
     document.getElementById('student_name').addEventListener('change', event => {
         const option = [...document.getElementById('studentNames').options].find(item => item.value === event.target.value);
         if (option) document.getElementById('student_id_number').value = option.dataset.studentId || '';
@@ -673,7 +773,14 @@ include 'includes/sidebar.php';
         });
         if (course.value) localStorage.setItem('bvSelectedPaymentCourse', course.value);
     }
-    if (method.value) renderSchedule();
+    if (method.value) {
+        renderSchedule(!submittedSchedule);
+        if (submittedSchedule) [...rows.children].forEach((row, index) => {
+            row.querySelector('input[type="date"]').value = submittedSchedule.dates[index] || '';
+            row.querySelector('input[type="number"]').value = submittedSchedule.amounts[index] || '0.00';
+            row.querySelector('input[type="checkbox"]').checked = !!submittedSchedule.paid[index];
+        });
+    }
 })();
 </script>
 
