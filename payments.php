@@ -64,6 +64,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $errors[] = 'The payment record could not be deleted. Please try again.';
                 }
             }
+        } elseif ($action === 'edit_student') {
+            $planId = filter_input(INPUT_POST, 'payment_plan_id', FILTER_VALIDATE_INT);
+            $studentName = trim($_POST['student_name'] ?? '');
+            $studentIdNumber = trim($_POST['student_id_number'] ?? '');
+            if (!$planId) $errors[] = 'Invalid payment record.';
+            if ($studentName === '' || mb_strlen($studentName) > 255) $errors[] = 'Enter a student name of up to 255 characters.';
+            if ($studentIdNumber === '' || mb_strlen($studentIdNumber) > 50) $errors[] = 'Enter a student ID of up to 50 characters.';
+            if (!$errors) {
+                try {
+                    $studentUserId = null;
+                    $lookup = $conn->prepare("SELECT id FROM users WHERE user_role = 'student' AND (user_id = ? OR CAST(id AS CHAR) = ?) LIMIT 1");
+                    $lookup->bind_param('ss', $studentIdNumber, $studentIdNumber);
+                    $lookup->execute();
+                    $foundStudent = $lookup->get_result()->fetch_assoc();
+                    if ($foundStudent) $studentUserId = (int)$foundStudent['id'];
+                    $lookup->close();
+                    $stmt = $conn->prepare("UPDATE payment_plans SET student_name = ?, student_id_number = ?, student_user_id = ? WHERE id = ?");
+                    $stmt->bind_param('ssii', $studentName, $studentIdNumber, $studentUserId, $planId);
+                    $stmt->execute();
+                    $stmt->close();
+                    $_SESSION['payment_success'] = 'Student details saved successfully.';
+                    $returnQuery = trim($_POST['return_query'] ?? '');
+                    header('Location: payments.php' . ($returnQuery !== '' ? '?' . $returnQuery : '') . '#payment-plan-' . $planId);
+                    exit;
+                } catch (Throwable $e) {
+                    error_log('Payment student update failed: ' . $e->getMessage());
+                    $errors[] = 'Student details could not be saved. Please try again.';
+                }
+            }
         } elseif ($action === 'delete_course') {
             $courseId = filter_input(INPUT_POST, 'course_id', FILTER_VALIDATE_INT);
             if (!$courseId) {
@@ -228,6 +257,21 @@ $status = $_GET['status'] ?? '';
 $allowedStatuses = ['', 'paid', 'pending', 'overdue'];
 if (!in_array($status, $allowedStatuses, true)) $status = '';
 
+$sortColumns = [
+    'student_id' => 'p.student_id_number',
+    'student' => 'p.student_name',
+    'course' => 'c.course_number',
+    'method' => "CASE p.payment_method WHEN 'full' THEN 'Full Payment' WHEN 'half' THEN 'Half Payment' WHEN 'quarter' THEN 'Quarter Payment' WHEN 'scholarship' THEN 'Scholarship' WHEN 'free_card' THEN 'Free Card' END",
+    'progress' => 'SUM(i.is_paid) / COUNT(i.id)',
+    'amount' => 'p.total_amount',
+    'next_date' => 'next_due_date',
+    'status' => "CASE WHEN SUM(i.is_paid) = COUNT(i.id) THEN 'Paid' WHEN MIN(CASE WHEN i.is_paid = 0 THEN i.payment_date END) < CURDATE() THEN 'Overdue' ELSE 'Pending' END",
+];
+$sort = is_string($_GET['sort'] ?? null) && isset($sortColumns[$_GET['sort']]) ? $_GET['sort'] : '';
+$direction = ($_GET['direction'] ?? '') === 'desc' ? 'desc' : 'asc';
+$orderBy = $sort !== '' ? $sortColumns[$sort] . ' ' . strtoupper($direction) . ', p.id DESC' : 'p.created_at DESC, p.id DESC';
+$recordQuery = ['search' => $search, 'status' => $status, 'sort' => $sort, 'direction' => $direction];
+
 $where = ['1=1'];
 $params = [];
 $types = '';
@@ -251,7 +295,7 @@ $sql = "SELECT p.*, c.course_number, c.course_name,
     JOIN payment_installments i ON i.payment_plan_id = p.id
     LEFT JOIN payment_courses c ON c.id = p.course_id
     WHERE " . implode(' AND ', $where) . "
-    GROUP BY p.id ORDER BY p.created_at DESC";
+    GROUP BY p.id ORDER BY " . $orderBy;
 $stmt = $conn->prepare($sql);
 if ($params) $stmt->bind_param($types, ...$params);
 $stmt->execute();
@@ -406,6 +450,8 @@ include 'includes/sidebar.php';
             <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
                 <div><h2 class="text-xl font-semibold text-gray-800">Payment Records</h2><p class="text-sm text-gray-500 mt-1"><?php echo count($plans); ?> record(s) shown</p></div>
                 <form method="GET" class="flex flex-col sm:flex-row gap-3">
+                    <input type="hidden" name="sort" value="<?php echo htmlspecialchars($sort); ?>">
+                    <input type="hidden" name="direction" value="<?php echo htmlspecialchars($direction); ?>">
                     <input name="search" value="<?php echo htmlspecialchars($search); ?>" class="border rounded-lg px-4 py-2" placeholder="Student name or ID">
                     <select name="status" class="border rounded-lg px-4 py-2 bg-white">
                         <option value="">All statuses</option><option value="paid" <?php echo $status === 'paid' ? 'selected' : ''; ?>>Fully paid</option><option value="pending" <?php echo $status === 'pending' ? 'selected' : ''; ?>>Pending</option><option value="overdue" <?php echo $status === 'overdue' ? 'selected' : ''; ?>>Overdue</option>
@@ -419,20 +465,33 @@ include 'includes/sidebar.php';
         <?php else: ?>
             <div class="overflow-x-auto">
                 <table class="w-full min-w-[900px]">
-                    <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="text-left px-6 py-3">Student</th><th class="text-left px-6 py-3">Course</th><th class="text-left px-6 py-3">Method</th><th class="text-left px-6 py-3">Progress</th><th class="text-left px-6 py-3">Amount</th><th class="text-left px-6 py-3">Next date</th><th class="text-left px-6 py-3">Status</th><th class="text-right px-6 py-3">Action</th></tr></thead>
+                    <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
+                        <?php foreach (['student_id' => 'Student ID', 'student' => 'Student', 'course' => 'Course', 'method' => 'Method', 'progress' => 'Progress', 'amount' => 'Amount', 'next_date' => 'Next date', 'status' => 'Status'] as $key => $label):
+                            $nextDirection = $sort === $key && $direction === 'asc' ? 'desc' : 'asc';
+                            $sortUrl = 'payments.php?' . http_build_query(array_merge($recordQuery, ['sort' => $key, 'direction' => $nextDirection])) . '#payment-records';
+                        ?>
+                            <th scope="col" class="text-left px-6 py-3" aria-sort="<?php echo $sort === $key ? ($direction === 'asc' ? 'ascending' : 'descending') : 'none'; ?>">
+                                <a href="<?php echo htmlspecialchars($sortUrl); ?>" class="inline-flex items-center gap-2 hover:text-blue-600 whitespace-nowrap" title="Sort by <?php echo htmlspecialchars($label); ?> <?php echo $nextDirection === 'asc' ? 'ascending' : 'descending'; ?>">
+                                    <?php echo htmlspecialchars($label); ?><i aria-hidden="true" class="fas <?php echo $sort === $key ? ($direction === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort'; ?>"></i>
+                                </a>
+                            </th>
+                        <?php endforeach; ?>
+                        <th scope="col" class="text-right px-6 py-3">Action</th>
+                    </tr></thead>
                     <tbody class="divide-y">
                     <?php foreach ($plans as $plan):
                         $complete = (int)$plan['paid_count'] === (int)$plan['installment_count'];
                         $overdue = !$complete && $plan['next_due_date'] && $plan['next_due_date'] < date('Y-m-d');
                     ?>
                         <tr id="payment-plan-<?php echo (int)$plan['id']; ?>" class="hover:bg-gray-50 align-top scroll-mt-6">
-                            <td class="px-6 py-4"><p class="font-medium text-gray-900"><?php echo htmlspecialchars($plan['student_name']); ?></p><p class="text-sm text-gray-500"><?php echo htmlspecialchars($plan['student_id_number']); ?></p></td>
+                            <td class="px-6 py-4 text-sm text-gray-700 whitespace-nowrap"><?php echo htmlspecialchars($plan['student_id_number']); ?></td>
+                            <td class="px-6 py-4"><p class="font-medium text-gray-900"><?php echo htmlspecialchars($plan['student_name']); ?></p></td>
                             <td class="px-6 py-4"><p class="text-sm font-medium text-gray-800"><?php echo htmlspecialchars($plan['course_number'] ?? '—'); ?></p><p class="text-xs text-gray-500"><?php echo htmlspecialchars($plan['course_name'] ?? 'No course'); ?></p></td>
                             <td class="px-6 py-4 text-sm text-gray-700"><?php echo htmlspecialchars($methodLabels[$plan['payment_method']] ?? $plan['payment_method']); ?></td>
                             <td class="px-6 py-4"><p class="text-sm font-medium"><?php echo (int)$plan['paid_count']; ?> / <?php echo (int)$plan['installment_count']; ?> paid</p><details class="mt-2" <?php echo $openPlanId === (int)$plan['id'] ? 'open' : ''; ?>><summary class="text-blue-600 text-sm cursor-pointer">View schedule</summary><div class="mt-3 space-y-2 min-w-[280px]">
                                 <?php foreach ($installmentsByPlan[$plan['id']] ?? [] as $item): ?>
                                     <form method="POST" class="flex items-center justify-between gap-3 rounded-lg border p-2 bg-white">
-                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>"><input type="hidden" name="action" value="toggle_installment"><input type="hidden" name="installment_id" value="<?php echo (int)$item['id']; ?>"><input type="hidden" name="is_paid" value="<?php echo $item['is_paid'] ? '0' : '1'; ?>"><input type="hidden" name="return_query" value="<?php echo htmlspecialchars(http_build_query(['search' => $search, 'status' => $status, 'open_plan' => (int)$plan['id']])); ?>"><input type="hidden" name="return_anchor" value="payment-plan-<?php echo (int)$plan['id']; ?>">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>"><input type="hidden" name="action" value="toggle_installment"><input type="hidden" name="installment_id" value="<?php echo (int)$item['id']; ?>"><input type="hidden" name="is_paid" value="<?php echo $item['is_paid'] ? '0' : '1'; ?>"><input type="hidden" name="return_query" value="<?php echo htmlspecialchars(http_build_query(array_merge($recordQuery, ['open_plan' => (int)$plan['id']]))); ?>"><input type="hidden" name="return_anchor" value="payment-plan-<?php echo (int)$plan['id']; ?>">
                                         <div><p class="text-xs font-semibold">Payment <?php echo (int)$item['installment_number']; ?> · <?php echo date('M j, Y', strtotime($item['payment_date'])); ?></p><p class="text-xs text-gray-500">Rs. <?php echo number_format((float)$item['amount'], 2); ?></p></div>
                                         <button class="text-xs px-2 py-1 rounded <?php echo $item['is_paid'] ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'; ?>"><?php echo $item['is_paid'] ? 'Paid ✓' : 'Mark paid'; ?></button>
                                     </form>
@@ -442,11 +501,29 @@ include 'includes/sidebar.php';
                             <td class="px-6 py-4 text-sm text-gray-700"><?php echo $plan['next_due_date'] ? date('M j, Y', strtotime($plan['next_due_date'])) : '—'; ?></td>
                             <td class="px-6 py-4"><?php if ($complete): ?><span class="px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">Paid</span><?php elseif ($overdue): ?><span class="px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">Overdue</span><?php else: ?><span class="px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700 text-xs font-semibold">Pending</span><?php endif; ?></td>
                             <td class="px-6 py-4 text-right">
+                                <details class="mb-2" <?php echo ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id'] ? 'open' : ''; ?>>
+                                    <summary class="cursor-pointer text-blue-600 text-sm whitespace-nowrap"><i class="fas fa-pen mr-1" aria-hidden="true"></i>Edit student</summary>
+                                    <form method="POST" class="mt-3 space-y-3 text-left min-w-[220px] rounded-lg border p-3 bg-white">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
+                                        <input type="hidden" name="action" value="edit_student">
+                                        <input type="hidden" name="payment_plan_id" value="<?php echo (int)$plan['id']; ?>">
+                                        <input type="hidden" name="return_query" value="<?php echo htmlspecialchars(http_build_query($recordQuery)); ?>">
+                                        <?php $editingThisPlan = ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id']; ?>
+                                        <label class="block text-xs font-medium text-gray-700">Student name
+                                            <input name="student_name" required maxlength="255" value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['student_name'] ?? '') : $plan['student_name']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
+                                        </label>
+                                        <label class="block text-xs font-medium text-gray-700">Student ID
+                                            <input name="student_id_number" required maxlength="50" value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['student_id_number'] ?? '') : $plan['student_id_number']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
+                                        </label>
+                                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm">Save details</button>
+                                        <button type="button" onclick="this.closest('details').open = false" class="text-gray-600 px-2 py-2 text-sm">Cancel</button>
+                                    </form>
+                                </details>
                                 <form method="POST" onsubmit="return confirm('Delete this complete payment record and all installment rows? This cannot be undone.');">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
                                     <input type="hidden" name="action" value="delete_payment">
                                     <input type="hidden" name="payment_plan_id" value="<?php echo (int)$plan['id']; ?>">
-                                    <input type="hidden" name="return_query" value="<?php echo htmlspecialchars(http_build_query(['search' => $search, 'status' => $status])); ?>">
+                                    <input type="hidden" name="return_query" value="<?php echo htmlspecialchars(http_build_query($recordQuery)); ?>">
                                     <button type="submit" class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-red-50 text-red-600 hover:bg-red-600 hover:text-white" title="Delete payment record" aria-label="Delete payment record for <?php echo htmlspecialchars($plan['student_name']); ?>">
                                         <i class="fas fa-trash-can"></i>
                                     </button>

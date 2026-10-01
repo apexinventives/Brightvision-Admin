@@ -3,7 +3,7 @@
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '');
-define('DB_NAME', 'brightvi_BVMain');
+define('DB_NAME', 'bvadmin');
 
 // Create connection
 function getConnection() {
