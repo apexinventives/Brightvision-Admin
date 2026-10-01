@@ -100,15 +100,15 @@ $exportParams = array_filter(
 include 'includes/header.php';
 include 'includes/sidebar.php';
 ?>
-<div class="p-8">
+<div class="p-4 sm:p-6 lg:p-8">
     <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
         <div><h1 class="text-3xl font-bold text-gray-800">Payment Reports</h1><p class="text-gray-500 mt-1">Filter, review, and export student payment information.</p></div>
-        <div class="flex gap-2">
-            <a href="?<?php echo htmlspecialchars(http_build_query($exportParams + ['format' => 'csv'])); ?>" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"><i class="fas fa-file-csv mr-2"></i>Export CSV</a>
-            <a href="?<?php echo htmlspecialchars(http_build_query($exportParams + ['format' => 'pdf'])); ?>" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg"><i class="fas fa-file-pdf mr-2"></i>Export PDF</a>
+        <div class="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+            <a href="?<?php echo htmlspecialchars(http_build_query($exportParams + ['format' => 'csv'])); ?>" class="bg-gray-700 hover:bg-gray-800 text-white px-4 py-2.5 rounded-lg text-center w-full sm:w-auto"><i class="fas fa-file-csv mr-2"></i>Export CSV</a>
+            <a href="?<?php echo htmlspecialchars(http_build_query($exportParams + ['format' => 'pdf'])); ?>" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-lg text-center w-full sm:w-auto"><i class="fas fa-file-pdf mr-2"></i>Export PDF</a>
         </div>
     </div>
-    <form method="GET" class="bg-white rounded-xl shadow-md p-6 mb-6">
+    <form method="GET" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Search</label><input name="search" value="<?php echo htmlspecialchars($search); ?>" class="w-full border rounded-lg px-3 py-2" placeholder="Student or course"></div>
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Course</label><select name="course_id" class="w-full border rounded-lg px-3 py-2 bg-white"><option value="">All courses</option><?php foreach ($courses as $course): ?><option value="<?php echo (int)$course['id']; ?>" <?php echo $courseId === (int)$course['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($course['course_number'] . ' - ' . $course['course_name']); ?></option><?php endforeach; ?></select></div>
@@ -116,7 +116,7 @@ include 'includes/sidebar.php';
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Created From</label><input type="date" name="date_from" value="<?php echo htmlspecialchars($dateFrom); ?>" class="w-full border rounded-lg px-3 py-2"></div>
             <div><label class="block text-sm font-medium text-gray-700 mb-2">Created To</label><input type="date" name="date_to" value="<?php echo htmlspecialchars($dateTo); ?>" class="w-full border rounded-lg px-3 py-2"></div>
         </div>
-        <div class="flex justify-end gap-2 mt-4"><a href="payment-reports.php" class="px-4 py-2 border rounded-lg text-gray-600">Clear</a><button class="bg-blue-600 text-white px-5 py-2 rounded-lg"><i class="fas fa-filter mr-2"></i>Generate Report</button></div>
+        <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4"><a href="payment-reports.php" class="px-4 py-2 border rounded-lg text-gray-600 text-center">Clear</a><button class="bg-blue-600 text-white px-5 py-2 rounded-lg"><i class="fas fa-filter mr-2"></i>Generate Report</button></div>
     </form>
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <div class="bg-white shadow rounded-xl p-5 border-l-4 border-blue-500"><p class="text-sm text-gray-500">Payment Plans</p><p class="text-2xl font-bold text-gray-800"><?php echo $summary['plans']; ?></p></div>

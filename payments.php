@@ -275,16 +275,18 @@ include 'includes/header.php';
 include 'includes/sidebar.php';
 ?>
 
-<div class="p-8">
+<div class="p-4 sm:p-6 lg:p-8">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-8">
         <div>
             <h1 class="text-3xl font-bold text-gray-800">Student Payments</h1>
             <p class="text-gray-500 mt-1">Create payment plans and track every installment date.</p>
         </div>
-        <button type="button" onclick="document.getElementById('payment-form').scrollIntoView({behavior:'smooth'})" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
-            <i class="fas fa-plus mr-2"></i>New Payment
-        </button>
-        <a href="payment-reports.php" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg"><i class="fas fa-chart-column mr-2"></i>Reports</a>
+        <div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <button type="button" onclick="document.getElementById('payment-form').scrollIntoView({behavior:'smooth'})" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg w-full sm:w-auto">
+                <i class="fas fa-plus mr-2"></i>New Payment
+            </button>
+            <a href="payment-reports.php" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2.5 rounded-lg text-center w-full sm:w-auto"><i class="fas fa-chart-column mr-2"></i>Reports</a>
+        </div>
     </div>
 
     <?php if ($success): ?>
@@ -297,7 +299,7 @@ include 'includes/sidebar.php';
         </div>
     <?php endif; ?>
 
-    <section class="bg-white rounded-xl shadow-md p-6 mb-6">
+    <section class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
                 <h2 class="text-xl font-semibold text-gray-800">Create Course</h2>
@@ -334,7 +336,7 @@ include 'includes/sidebar.php';
         <?php endif; ?>
     </section>
 
-    <section id="payment-form" class="bg-white rounded-xl shadow-md p-6 mb-8">
+    <section id="payment-form" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-8">
         <div class="flex items-center justify-between mb-6">
             <div><h2 class="text-xl font-semibold text-gray-800">Create Payment Plan</h2><p class="text-sm text-gray-500 mt-1">Installments are generated from the payment method.</p></div>
             <div class="hidden sm:flex w-11 h-11 rounded-full bg-blue-100 text-blue-600 items-center justify-center"><i class="fas fa-receipt"></i></div>
@@ -400,7 +402,7 @@ include 'includes/sidebar.php';
     </section>
 
     <section id="payment-records" class="bg-white rounded-xl shadow-md overflow-hidden scroll-mt-6">
-        <div class="p-6 border-b">
+        <div class="p-4 sm:p-6 border-b">
             <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
                 <div><h2 class="text-xl font-semibold text-gray-800">Payment Records</h2><p class="text-sm text-gray-500 mt-1"><?php echo count($plans); ?> record(s) shown</p></div>
                 <form method="GET" class="flex flex-col sm:flex-row gap-3">

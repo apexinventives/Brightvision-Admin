@@ -58,8 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="bg-gradient-to-br from-blue-600 to-blue-800 min-h-screen flex items-center justify-center">
-    <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-lg p-5 sm:p-8 w-full max-w-md">
         <div class="text-center mb-8">
             <h1 class="text-3xl font-bold text-gray-800">Teacher's Panel</h1>
             <p class="text-gray-600 mt-2">Login to access the dashboard</p>
