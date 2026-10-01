@@ -599,7 +599,21 @@ include 'includes/sidebar.php';
 </div>
 
 <style>
-.payment-edit-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.payment-edit-dialog {
+    width: min(480px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+    margin: auto;
+    border: 0;
+    overflow-y: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+}
+.payment-edit-dialog form { min-width: 0; }
+.payment-edit-dialog input { display: block; min-width: 0; max-width: 100%; }
+.payment-edit-dialog h2 { min-width: 0; }
+.payment-edit-dialog button { flex-shrink: 0; }
 .payment-edit-dialog::backdrop { background: rgba(15, 23, 42, 0.55); }
 </style>
 <script>
