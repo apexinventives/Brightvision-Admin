@@ -68,11 +68,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $planId = filter_input(INPUT_POST, 'payment_plan_id', FILTER_VALIDATE_INT);
             $studentName = trim($_POST['student_name'] ?? '');
             $studentIdNumber = trim($_POST['student_id_number'] ?? '');
+            $totalAmount = filter_var($_POST['total_amount'] ?? '', FILTER_VALIDATE_FLOAT);
             if (!$planId) $errors[] = 'Invalid payment record.';
             if ($studentName === '' || mb_strlen($studentName) > 255) $errors[] = 'Enter a student name of up to 255 characters.';
             if ($studentIdNumber === '' || mb_strlen($studentIdNumber) > 50) $errors[] = 'Enter a student ID of up to 50 characters.';
+            if ($totalAmount === false || !is_finite((float)$totalAmount) || $totalAmount < 0 || $totalAmount > 9999999999.99 || abs($totalAmount - round($totalAmount, 2)) > 0.00001) $errors[] = 'Enter a valid amount with up to two decimal places.';
             if (!$errors) {
+                $conn->begin_transaction();
                 try {
+                    $currentStmt = $conn->prepare('SELECT total_amount, payment_method FROM payment_plans WHERE id = ? FOR UPDATE');
+                    $currentStmt->bind_param('i', $planId);
+                    $currentStmt->execute();
+                    $currentPlan = $currentStmt->get_result()->fetch_assoc();
+                    $currentStmt->close();
+                    if (!$currentPlan) throw new RuntimeException('Payment record no longer exists.');
+                    if (in_array($currentPlan['payment_method'], ['scholarship', 'free_card'], true) && $totalAmount != 0) {
+                        throw new InvalidArgumentException('Scholarship and Free Card amounts must remain zero.');
+                    }
+                    if (round((float)$currentPlan['total_amount'] * 100) !== round($totalAmount * 100)) {
+                        $itemsStmt = $conn->prepare('SELECT id, amount FROM payment_installments WHERE payment_plan_id = ? ORDER BY installment_number FOR UPDATE');
+                        $itemsStmt->bind_param('i', $planId);
+                        $itemsStmt->execute();
+                        $items = $itemsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                        $itemsStmt->close();
+                        if (!$items) throw new RuntimeException('Payment schedule is missing.');
+                        $oldTotal = array_sum(array_column($items, 'amount'));
+                        $remainingCents = (int)round($totalAmount * 100);
+                        $newTotalCents = $remainingCents;
+                        $updateItem = $conn->prepare('UPDATE payment_installments SET amount = ? WHERE id = ?');
+                        foreach ($items as $index => $item) {
+                            $cents = $index === count($items) - 1 ? $remainingCents : (int)floor($newTotalCents * ($oldTotal > 0 ? (float)$item['amount'] / $oldTotal : 1 / count($items)));
+                            $remainingCents -= $cents;
+                            $amount = $cents / 100;
+                            $itemId = (int)$item['id'];
+                            $updateItem->bind_param('di', $amount, $itemId);
+                            $updateItem->execute();
+                        }
+                        $updateItem->close();
+                    }
                     $studentUserId = null;
                     $lookup = $conn->prepare("SELECT id FROM users WHERE user_role = 'student' AND (user_id = ? OR CAST(id AS CHAR) = ?) LIMIT 1");
                     $lookup->bind_param('ss', $studentIdNumber, $studentIdNumber);
@@ -80,17 +113,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $foundStudent = $lookup->get_result()->fetch_assoc();
                     if ($foundStudent) $studentUserId = (int)$foundStudent['id'];
                     $lookup->close();
-                    $stmt = $conn->prepare("UPDATE payment_plans SET student_name = ?, student_id_number = ?, student_user_id = ? WHERE id = ?");
-                    $stmt->bind_param('ssii', $studentName, $studentIdNumber, $studentUserId, $planId);
+                    $stmt = $conn->prepare("UPDATE payment_plans SET student_name = ?, student_id_number = ?, student_user_id = ?, total_amount = ? WHERE id = ?");
+                    $stmt->bind_param('ssidi', $studentName, $studentIdNumber, $studentUserId, $totalAmount, $planId);
                     $stmt->execute();
                     $stmt->close();
-                    $_SESSION['payment_success'] = 'Student details saved successfully.';
+                    $conn->commit();
+                    $_SESSION['payment_success'] = 'Student details and payment amount saved successfully.';
                     $returnQuery = trim($_POST['return_query'] ?? '');
                     header('Location: payments.php' . ($returnQuery !== '' ? '?' . $returnQuery : '') . '#payment-plan-' . $planId);
                     exit;
                 } catch (Throwable $e) {
+                    $conn->rollback();
                     error_log('Payment student update failed: ' . $e->getMessage());
-                    $errors[] = 'Student details could not be saved. Please try again.';
+                    $errors[] = $e instanceof InvalidArgumentException ? $e->getMessage() : 'Payment details could not be saved. Please try again.';
                 }
             }
         } elseif ($action === 'delete_course') {
@@ -501,9 +536,16 @@ include 'includes/sidebar.php';
                             <td class="px-6 py-4 text-sm text-gray-700"><?php echo $plan['next_due_date'] ? date('M j, Y', strtotime($plan['next_due_date'])) : '—'; ?></td>
                             <td class="px-6 py-4"><?php if ($complete): ?><span class="px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">Paid</span><?php elseif ($overdue): ?><span class="px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">Overdue</span><?php else: ?><span class="px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700 text-xs font-semibold">Pending</span><?php endif; ?></td>
                             <td class="px-6 py-4 text-right">
-                                <details class="mb-2" <?php echo ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id'] ? 'open' : ''; ?>>
-                                    <summary class="cursor-pointer text-blue-600 text-sm whitespace-nowrap"><i class="fas fa-pen mr-1" aria-hidden="true"></i>Edit student</summary>
-                                    <form method="POST" class="mt-3 space-y-3 text-left min-w-[220px] rounded-lg border p-3 bg-white">
+                                <button type="button" class="mb-2 inline-flex items-center gap-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-2 text-sm" onclick="document.getElementById('edit-payment-<?php echo (int)$plan['id']; ?>').showModal()"><i class="fas fa-pen" aria-hidden="true"></i>Edit</button>
+                                <dialog id="edit-payment-<?php echo (int)$plan['id']; ?>" class="payment-edit-dialog rounded-xl shadow-xl p-0 text-left" data-reopen="<?php echo $errors && ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id'] ? '1' : '0'; ?>" aria-labelledby="edit-payment-title-<?php echo (int)$plan['id']; ?>">
+                                    <form method="POST" class="space-y-4 p-6 bg-white">
+                                        <div class="flex items-center justify-between gap-4">
+                                            <h2 id="edit-payment-title-<?php echo (int)$plan['id']; ?>" class="text-xl font-semibold text-gray-800">Edit Payment Details</h2>
+                                            <button type="button" onclick="this.closest('dialog').close()" class="text-gray-500 text-xl" aria-label="Close edit popup">&times;</button>
+                                        </div>
+                                        <?php if ($errors && ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id']): ?>
+                                            <div role="alert" class="rounded-lg bg-red-50 text-red-700 p-3 text-sm"><?php echo htmlspecialchars(implode(' ', $errors)); ?></div>
+                                        <?php endif; ?>
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
                                         <input type="hidden" name="action" value="edit_student">
                                         <input type="hidden" name="payment_plan_id" value="<?php echo (int)$plan['id']; ?>">
@@ -515,10 +557,16 @@ include 'includes/sidebar.php';
                                         <label class="block text-xs font-medium text-gray-700">Student ID
                                             <input name="student_id_number" required maxlength="50" value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['student_id_number'] ?? '') : $plan['student_id_number']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
                                         </label>
-                                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm">Save details</button>
-                                        <button type="button" onclick="this.closest('details').open = false" class="text-gray-600 px-2 py-2 text-sm">Cancel</button>
+                                        <label class="block text-xs font-medium text-gray-700">Total Amount (Rs.)
+                                            <input type="number" name="total_amount" required min="0" max="9999999999.99" step="0.01" <?php echo in_array($plan['payment_method'], ['scholarship', 'free_card'], true) ? 'readonly' : ''; ?> value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['total_amount'] ?? '') : $plan['total_amount']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
+                                        </label>
+                                        <p class="text-xs text-gray-500">Changing the total adjusts all installment amounts proportionally, including paid installments. Dates and paid status stay the same. Scholarship and Free Card amounts remain zero.</p>
+                                        <div class="flex justify-end gap-2 pt-2">
+                                            <button type="button" onclick="this.closest('dialog').close()" class="text-gray-600 px-3 py-2 text-sm">Cancel</button>
+                                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">Save Changes</button>
+                                        </div>
                                     </form>
-                                </details>
+                                </dialog>
                                 <form method="POST" onsubmit="return confirm('Delete this complete payment record and all installment rows? This cannot be undone.');">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
                                     <input type="hidden" name="action" value="delete_payment">
@@ -538,8 +586,19 @@ include 'includes/sidebar.php';
     </section>
 </div>
 
+<style>
+.payment-edit-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.payment-edit-dialog::backdrop { background: rgba(15, 23, 42, 0.55); }
+</style>
 <script>
 (() => {
+    document.querySelectorAll('.payment-edit-dialog').forEach(dialog => {
+        dialog.addEventListener('click', event => {
+            const bounds = dialog.getBoundingClientRect();
+            if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
+        });
+        if (dialog.dataset.reopen === '1') dialog.showModal();
+    });
     const counts = {full: 1, half: 2, quarter: 3, scholarship: 1, free_card: 1};
     const method = document.getElementById('payment_method');
     const total = document.getElementById('total_amount');
