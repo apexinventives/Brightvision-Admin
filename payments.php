@@ -337,6 +337,16 @@ $stmt->execute();
 $plans = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
+// Compare number groups naturally: 2, 10, 110 and BV-2, BV-10, BV-110.
+if (in_array($sort, ['student_id', 'course'], true)) {
+    $sortField = $sort === 'student_id' ? 'student_id_number' : 'course_number';
+    usort($plans, static function ($left, $right) use ($sortField, $direction) {
+        $comparison = strnatcasecmp((string)($left[$sortField] ?? ''), (string)($right[$sortField] ?? ''));
+        if ($comparison === 0) return (int)$right['id'] <=> (int)$left['id'];
+        return $direction === 'desc' ? -$comparison : $comparison;
+    });
+}
+
 $courses = $conn->query("SELECT id, course_number, course_name FROM payment_courses ORDER BY course_name, course_number")->fetch_all(MYSQLI_ASSOC);
 $selectedCourseId = (int)($_POST['course_id'] ?? $_GET['course_id'] ?? $_SESSION['selected_payment_course_id'] ?? 0);
 if ($selectedCourseId > 0) $_SESSION['selected_payment_course_id'] = $selectedCourseId;
@@ -536,7 +546,8 @@ include 'includes/sidebar.php';
                             <td class="px-6 py-4 text-sm text-gray-700"><?php echo $plan['next_due_date'] ? date('M j, Y', strtotime($plan['next_due_date'])) : '—'; ?></td>
                             <td class="px-6 py-4"><?php if ($complete): ?><span class="px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">Paid</span><?php elseif ($overdue): ?><span class="px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">Overdue</span><?php else: ?><span class="px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700 text-xs font-semibold">Pending</span><?php endif; ?></td>
                             <td class="px-6 py-4 text-right">
-                                <button type="button" class="mb-2 inline-flex items-center gap-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-2 text-sm" onclick="document.getElementById('edit-payment-<?php echo (int)$plan['id']; ?>').showModal()"><i class="fas fa-pen" aria-hidden="true"></i>Edit</button>
+                                <div class="flex items-center justify-end gap-2 whitespace-nowrap">
+                                <button type="button" class="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 text-sm" onclick="document.getElementById('edit-payment-<?php echo (int)$plan['id']; ?>').showModal()"><i class="fas fa-pen" aria-hidden="true"></i>Edit</button>
                                 <dialog id="edit-payment-<?php echo (int)$plan['id']; ?>" class="payment-edit-dialog rounded-xl shadow-xl p-0 text-left" data-reopen="<?php echo $errors && ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id'] ? '1' : '0'; ?>" aria-labelledby="edit-payment-title-<?php echo (int)$plan['id']; ?>">
                                     <form method="POST" class="space-y-4 p-6 bg-white">
                                         <div class="flex items-center justify-between gap-4">
@@ -576,6 +587,7 @@ include 'includes/sidebar.php';
                                         <i class="fas fa-trash-can"></i>
                                     </button>
                                 </form>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
