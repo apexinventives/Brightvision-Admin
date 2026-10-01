@@ -21,6 +21,16 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <i class="fas fa-calendar-alt w-6"></i>
             <span class="mx-3">Exam Reservations</span>
         </a>
+
+        <a href="payments.php" class="flex items-center px-6 py-3 <?php echo $current_page == 'payments.php' ? 'bg-blue-700 border-l-4 border-yellow-400' : 'hover:bg-blue-700'; ?> transition-colors duration-200">
+            <i class="fas fa-money-check-dollar w-6"></i>
+            <span class="mx-3">Payments</span>
+        </a>
+
+        <a href="payment-reports.php" class="flex items-center px-6 py-3 <?php echo $current_page == 'payment-reports.php' ? 'bg-blue-700 border-l-4 border-yellow-400' : 'hover:bg-blue-700'; ?> transition-colors duration-200">
+            <i class="fas fa-file-invoice-dollar w-6"></i>
+            <span class="mx-3">Payment Reports</span>
+        </a>
         <!-- Add this after the Reservations link or wherever appropriate -->
 		<a href="bv-growth-upload.php" class="flex items-center px-6 py-3 <?php echo basename($_SERVER['PHP_SELF']) == 'bv-growth-upload.php' ? 'bg-blue-700 border-l-4 border-yellow-400' : 'hover:bg-blue-700'; ?> transition-colors duration-200">
 			<i class="fas fa-chart-line w-6"></i>
