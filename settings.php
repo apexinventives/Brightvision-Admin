@@ -29,6 +29,12 @@ $create_settings_table = "CREATE TABLE IF NOT EXISTS system_settings (
 
 $conn->query($create_settings_table);
 
+// Older installations created this table without the audit column.
+$auditColumn = $conn->query("SHOW COLUMNS FROM system_settings LIKE 'updated_by'");
+if ($auditColumn && $auditColumn->num_rows === 0) {
+    $conn->query('ALTER TABLE system_settings ADD COLUMN updated_by INT(11) NULL');
+}
+
 // Create activity log table if it doesn't exist
 $create_log_table = "CREATE TABLE IF NOT EXISTS admin_activity_log (
     id INT(11) AUTO_INCREMENT PRIMARY KEY,
@@ -42,11 +48,8 @@ $create_log_table = "CREATE TABLE IF NOT EXISTS admin_activity_log (
 
 $conn->query($create_log_table);
 
-// Insert default settings if table is empty
-$check_settings = $conn->query("SELECT COUNT(*) as count FROM system_settings");
-$settings_count = $check_settings->fetch_assoc()['count'];
-
-if ($settings_count == 0) {
+// Repair partially populated installations without replacing saved settings.
+{
     $default_settings = [
         ['site_name', 'Teacher\'s Admin Panel', 'text', 'Website name displayed in header'],
         ['site_description', 'Educational Management System', 'text', 'Site description for meta tags'],
@@ -74,7 +77,15 @@ if ($settings_count == 0) {
         ['linkedin_url', '', 'url', 'LinkedIn company URL']
     ];
     
-    $insert_stmt = $conn->prepare("INSERT INTO system_settings (setting_key, setting_value, setting_type, description) VALUES (?, ?, ?, ?)");
+    // Preserve the registration preference used by older installations.
+    $legacyRegistration = $conn->query("SELECT setting_value FROM system_settings WHERE setting_key = 'enable_registration'")->fetch_assoc();
+    if ($legacyRegistration) {
+        foreach ($default_settings as &$default) {
+            if ($default[0] === 'allow_registration') $default[1] = $legacyRegistration['setting_value'] === '1' ? '1' : '0';
+        }
+        unset($default);
+    }
+    $insert_stmt = $conn->prepare("INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, description) VALUES (?, ?, ?, ?)");
     foreach ($default_settings as $setting) {
         $insert_stmt->bind_param("ssss", $setting[0], $setting[1], $setting[2], $setting[3]);
         $insert_stmt->execute();
@@ -174,6 +185,13 @@ $settings_by_type = [];
 while($row = $settings_result->fetch_assoc()) {
     $settings[$row['setting_key']] = $row;
     $settings_by_type[$row['setting_type']][] = $row;
+}
+
+// Keep the form usable even if an installation cannot insert missing defaults.
+foreach ($default_settings as $default) {
+    if (!isset($settings[$default[0]])) {
+        $settings[$default[0]] = ['setting_value' => $default[1], 'setting_type' => $default[2], 'description' => $default[3]];
+    }
 }
 
 // Get system information
@@ -401,6 +419,7 @@ include 'includes/sidebar.php';
                         <div class="md:col-span-2 grid grid-cols-2 gap-4 mt-4">
                             <div>
                                 <label class="flex items-center space-x-3">
+                                    <input type="hidden" name="settings[maintenance_mode]" value="0">
                                     <input type="checkbox" name="settings[maintenance_mode]" value="1" 
                                            <?php echo $settings['maintenance_mode']['setting_value'] == '1' ? 'checked' : ''; ?>
                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
@@ -412,6 +431,7 @@ include 'includes/sidebar.php';
                             
                             <div>
                                 <label class="flex items-center space-x-3">
+                                    <input type="hidden" name="settings[allow_registration]" value="0">
                                     <input type="checkbox" name="settings[allow_registration]" value="1" 
                                            <?php echo $settings['allow_registration']['setting_value'] == '1' ? 'checked' : ''; ?>
                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
@@ -423,6 +443,7 @@ include 'includes/sidebar.php';
                             
                             <div>
                                 <label class="flex items-center space-x-3">
+                                    <input type="hidden" name="settings[enable_charts]" value="0">
                                     <input type="checkbox" name="settings[enable_charts]" value="1" 
                                            <?php echo $settings['enable_charts']['setting_value'] == '1' ? 'checked' : ''; ?>
                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
@@ -579,6 +600,7 @@ include 'includes/sidebar.php';
                         <!-- Email Notifications Toggle -->
                         <div class="md:col-span-2">
                             <label class="flex items-center space-x-3">
+                                <input type="hidden" name="settings[email_notifications]" value="0">
                                 <input type="checkbox" name="settings[email_notifications]" value="1" 
                                        <?php echo ($settings['email_notifications']['setting_value'] ?? '1') == '1' ? 'checked' : ''; ?>
                                        class="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
