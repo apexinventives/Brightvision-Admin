@@ -1,8 +1,9 @@
 <?php
-session_start();
+require_once 'config/session.php';
+redirectIfNotLoggedIn();
 
 // Check authentication
-if (!isset($_SESSION['authenticated'])) {
+if (!canAccess('reservations', 'sms')) {
     http_response_code(403);
     exit;
 }

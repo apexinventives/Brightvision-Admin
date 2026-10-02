@@ -24,11 +24,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($user = $result->fetch_assoc()) {
         if ($user['is_active'] == 1) {
             if (password_verify($password, $user['password_hash'])) {
+                ensureAccountPermissions($conn);
+                $roleStmt = $conn->prepare('SELECT role FROM account_permissions WHERE admin_id = ?');
+                $roleStmt->bind_param('i', $user['id']);
+                $roleStmt->execute();
+                $role = $roleStmt->get_result()->fetch_assoc()['role'];
+                $roleStmt->close();
+                session_regenerate_id(true);
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['user_name'] = $user['full_name'];
                 $_SESSION['user_email'] = $user['email'];
                 $_SESSION['username'] = $user['username'];
-                $_SESSION['user_role'] = 'admin';
+                $_SESSION['user_role'] = $role;
                 
                 // Update last login
                 updateLastLogin($conn, $user['id']);

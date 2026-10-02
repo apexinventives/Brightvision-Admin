@@ -174,7 +174,7 @@ include 'includes/sidebar.php';
                 </div>
                 
                 <div class="p-6">
-                    <form method="POST" class="space-y-4">
+                    <form method="POST" class="space-y-4"><fieldset <?php echo canAccess('profile', 'edit') ? '' : 'disabled'; ?>>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Admin ID</label>
@@ -213,7 +213,7 @@ include 'includes/sidebar.php';
                                 Update Profile
                             </button>
                         </div>
-                    </form>
+                    </fieldset></form>
                 </div>
             </div>
             
@@ -224,7 +224,7 @@ include 'includes/sidebar.php';
                 </div>
                 
                 <div class="p-6">
-                    <form method="POST" class="space-y-4" onsubmit="return validatePassword()">
+                    <form method="POST" class="space-y-4" onsubmit="return validatePassword()"><fieldset <?php echo canAccess('profile', 'edit') ? '' : 'disabled'; ?>>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">Current Password</label>
                             <div class="relative">
@@ -280,7 +280,7 @@ include 'includes/sidebar.php';
                                 Change Password
                             </button>
                         </div>
-                    </form>
+                    </fieldset></form>
                 </div>
             </div>
         </div>
@@ -311,7 +311,7 @@ include 'includes/sidebar.php';
                         </div>
                     </div>
                     
-                    <form method="POST" enctype="multipart/form-data">
+                    <form method="POST" enctype="multipart/form-data"><fieldset <?php echo canAccess('profile', 'edit') ? '' : 'disabled'; ?>>
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Upload New Picture</label>
                             <input type="file" name="avatar" accept="image/*" required
@@ -322,7 +322,7 @@ include 'includes/sidebar.php';
                             <i class="fas fa-upload mr-2"></i>
                             Upload Picture
                         </button>
-                    </form>
+                    </fieldset></form>
                 </div>
             </div>
             
@@ -381,10 +381,10 @@ include 'includes/sidebar.php';
                             Export Profile Data
                         </button>
                         <hr class="my-2">
-                        <a href="logout.php" class="block w-full text-left px-4 py-2 bg-red-50 hover:bg-red-100 rounded-lg transition-colors text-red-600">
+                        <?php if (canAccess('logout')): ?><a href="logout.php" class="block w-full text-left px-4 py-2 bg-red-50 hover:bg-red-100 rounded-lg transition-colors text-red-600">
                             <i class="fas fa-sign-out-alt mr-2"></i>
                             Logout
-                        </a>
+                        </a><?php endif; ?>
                     </div>
                 </div>
             </div>

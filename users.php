@@ -122,10 +122,12 @@ include 'includes/sidebar.php';
     <!-- Header -->
     <div class="flex justify-between items-center mb-8">
         <h1 class="text-3xl font-bold text-gray-800">Students Management</h1>
+        <?php if (canAccess('students', 'create')): ?>
         <a href="add-user.php" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center">
             <i class="fas fa-plus mr-2"></i>
             Add New Student
         </a>
+        <?php endif; ?>
     </div>
     
     <!-- Filters and Search -->
@@ -262,15 +264,17 @@ include 'includes/sidebar.php';
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?php echo date('Y-m-d', strtotime($user['created_at'])); ?></td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <div class="flex space-x-2">
-                                    <a href="view-user.php?id=<?php echo $user['id']; ?>" class="text-blue-600 hover:text-blue-900" title="View">
+                                    <?php if (canAccess('students', 'detail')): ?><a href="view-user.php?id=<?php echo $user['id']; ?>" class="text-blue-600 hover:text-blue-900" title="View">
                                         <i class="fas fa-eye"></i>
-                                    </a>
+                                    </a><?php endif; ?>
+                                    <?php if (canAccess('students', 'edit')): ?>
                                     <a href="edit-user.php?id=<?php echo $user['id']; ?>" class="text-green-600 hover:text-green-900" title="Edit">
                                         <i class="fas fa-edit"></i>
                                     </a>
-                                    <a href="delete-user.php?id=<?php echo $user['id']; ?>" class="text-red-600 hover:text-red-900" title="Delete" onclick="return confirmDelete('Are you sure you want to delete this student?')">
+                                    <?php endif; ?><?php if (canAccess('students', 'delete')): ?><a href="delete-user.php?id=<?php echo $user['id']; ?>" class="text-red-600 hover:text-red-900" title="Delete" onclick="return confirmDelete('Are you sure you want to delete this student?')">
                                         <i class="fas fa-trash"></i>
                                     </a>
+                                    <?php endif; ?>
                                 </div>
                             </td>
                         </tr>

@@ -4,10 +4,10 @@ require_once 'config/database.php';
 redirectIfNotLoggedIn();
 
 $conn = getConnection();
-$user_id = isset($_GET['id']) ? $_GET['id'] : 0;
+$user_id = (int)($_GET['id'] ?? 0);
 
 $user = $conn->query("SELECT * FROM users WHERE id = $user_id")->fetch_assoc();
-$reservations = $conn->query("SELECT * FROM reservations WHERE user_id = $user_id ORDER BY exam_date DESC");
+$reservations = canAccess('reservations') ? $conn->query("SELECT * FROM reservations WHERE user_id = $user_id ORDER BY exam_date DESC") : null;
 
 include 'includes/header.php';
 include 'includes/sidebar.php';
@@ -56,6 +56,7 @@ include 'includes/sidebar.php';
         </div>
         
         <!-- User's Reservations -->
+        <?php if (canAccess('reservations')): ?>
         <div class="bg-white rounded-lg shadow-md overflow-hidden">
             <div class="bg-gray-50 px-6 py-4 border-b">
                 <h3 class="text-lg font-semibold text-gray-800">Exam Reservations</h3>
@@ -97,6 +98,7 @@ include 'includes/sidebar.php';
             <?php endif; ?>
         </div>
         
+        <?php endif; ?>
         <div class="mt-6 flex justify-end">
             <a href="users.php" class="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                 Back to Students

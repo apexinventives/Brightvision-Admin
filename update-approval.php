@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once 'config/session.php';
+redirectIfNotLoggedIn();
 
 // Security headers
 header("Content-Security-Policy: default-src 'self'");
@@ -7,7 +8,7 @@ header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 
 // Check authentication
-if (!isset($_SESSION['authenticated'])) {
+if (!canAccess('reservations', 'approve')) {
     http_response_code(403);
     exit(json_encode(['error' => 'Unauthorized']));
 }
@@ -30,6 +31,9 @@ if (!$id || !in_array($status, [0, 1])) {
     http_response_code(400);
     exit(json_encode(['error' => 'Invalid request']));
 }
+
+// Check SMS access before updating approval so a denied request has no side effects.
+if ($status === 1 && $phone) requirePermission('reservations', 'sms');
 
 // Update database
 try {

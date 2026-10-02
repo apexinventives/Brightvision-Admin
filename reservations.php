@@ -387,19 +387,24 @@ include 'includes/sidebar.php';
                             </td>
                             <td class="px-4 py-4 whitespace-nowrap text-sm font-medium">
                                 <div class="flex space-x-2">
-                                    <?php if(!$reservation['approved']): ?>
+                                    <?php if(!$reservation['approved'] && canAccess('reservations', 'approve') && canAccess('reservations', 'sms')): ?>
                                         <button onclick="showSMSConfirm(<?php echo $reservation['id']; ?>, '<?php echo addslashes($reservation['full_name']); ?>', '<?php echo $reservation['whatsapp_number']; ?>', '<?php echo $reservation['exam_date']; ?>', '<?php echo $reservation['exam_time']; ?>')" 
                                                 class="text-green-600 hover:text-green-900" title="Approve with SMS">
                                             <i class="fas fa-check-circle"></i>
                                         </button>
                                     <?php endif; ?>
+                                    <?php if (!$reservation['approved'] && canAccess('reservations', 'approve') && !canAccess('reservations', 'sms')): ?>
+                                    <a href="approve-reservation.php?id=<?php echo (int)$reservation['id']; ?>" class="text-green-600" title="Approve"><i class="fas fa-check-circle"></i></a>
+                                    <?php endif; ?>
                                     <a href="#" class="text-blue-600 hover:text-blue-900" title="View Details" 
                                        onclick='showDetails(<?php echo json_encode($reservation); ?>)'>
                                         <i class="fas fa-info-circle"></i>
                                     </a>
+                                    <?php if (canAccess('reservations', 'delete')): ?>
                                     <a href="delete-reservation.php?id=<?php echo $reservation['id']; ?>" class="text-red-600 hover:text-red-900" title="Delete" onclick="return confirmDelete('Are you sure you want to delete this reservation?')">
                                         <i class="fas fa-trash"></i>
                                     </a>
+                                    <?php endif; ?>
                                 </div>
                             </td>
                         </tr>
@@ -726,4 +731,4 @@ document.getElementById('smsLogModal').addEventListener('click', function(e) {
 <?php
 $conn->close();
 include 'includes/footer.php';
-?> 
+?>

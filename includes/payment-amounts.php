@@ -27,7 +27,7 @@ function updateStudentPaymentAmounts($conn, array $amounts) {
     return $updatedPlans;
 }
 
-function updatePaymentMethodSchedule($conn, $planId, $method, $total, array $settings) {
+function updatePaymentMethodSchedule($conn, $planId, $method, $total, array $settings, array $customAmounts = null, array $customDates = null, array $customPaid = null) {
     $weights = [
         'full' => [$settings['full_amount']],
         'half' => [$settings['half_first'], $settings['half_second']],
@@ -54,15 +54,23 @@ function updatePaymentMethodSchedule($conn, $planId, $method, $total, array $set
         $number = $index + 1;
         $cents = $number === count($weights) ? $remaining : (int)floor($totalCents * ($weightTotal > 0 ? $weight / $weightTotal : 1 / count($weights)));
         $remaining -= $cents;
-        $amount = $cents / 100;
+        $amount = $customAmounts !== null ? $customAmounts[$index] : $cents / 100;
         if (isset($byNumber[$number])) {
             $itemId = (int)$byNumber[$number]['id'];
-            $stmt = $conn->prepare('UPDATE payment_installments SET amount = ? WHERE id = ?');
-            $stmt->bind_param('di', $amount, $itemId);
+            $date = $customDates !== null ? $customDates[$index] : $byNumber[$number]['payment_date'];
+            if ($customPaid !== null) {
+                $paid = $customPaid[$index];
+                $stmt = $conn->prepare('UPDATE payment_installments SET amount = ?, payment_date = ?, paid_at = CASE WHEN ? = 0 THEN NULL WHEN is_paid = 1 THEN paid_at ELSE NOW() END, is_paid = ? WHERE id = ?');
+                $stmt->bind_param('dsiii', $amount, $date, $paid, $paid, $itemId);
+            } else {
+                $stmt = $conn->prepare('UPDATE payment_installments SET amount = ?, payment_date = ? WHERE id = ?');
+                $stmt->bind_param('dsi', $amount, $date, $itemId);
+            }
         } else {
-            $date = (new DateTime($firstDate))->modify('+' . $index . ' month')->format('Y-m-d');
-            $stmt = $conn->prepare('INSERT INTO payment_installments (payment_plan_id, installment_number, amount, payment_date, is_paid) VALUES (?, ?, ?, ?, 0)');
-            $stmt->bind_param('iids', $planId, $number, $amount, $date);
+            $date = $customDates !== null ? $customDates[$index] : (new DateTime($firstDate))->modify('+' . $index . ' month')->format('Y-m-d');
+            $paid = $customPaid !== null ? $customPaid[$index] : 0;
+            $stmt = $conn->prepare('INSERT INTO payment_installments (payment_plan_id, installment_number, amount, payment_date, is_paid, paid_at) VALUES (?, ?, ?, ?, ?, IF(? = 1, NOW(), NULL))');
+            $stmt->bind_param('iidsii', $planId, $number, $amount, $date, $paid, $paid);
         }
         if (!$stmt->execute()) throw new RuntimeException('Could not update payment schedule.');
         $stmt->close();

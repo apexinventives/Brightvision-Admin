@@ -222,6 +222,7 @@ include 'includes/sidebar.php';
             </div>
         <?php endif; ?>
         
+        <?php if (canAccess('growth', 'manage')): ?>
         <form method="POST" enctype="multipart/form-data" class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -248,6 +249,7 @@ include 'includes/sidebar.php';
                 </a>
             </div>
         </form>
+        <?php endif; ?>
     </div>
     
     <!-- Data View Section -->

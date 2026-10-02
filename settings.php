@@ -7,6 +7,7 @@ $conn = getConnection();
 $admin_id = $_SESSION['user_id'];
 $message = '';
 $error = '';
+if (empty($_SESSION['settings_csrf'])) $_SESSION['settings_csrf'] = bin2hex(random_bytes(32));
 
 // Get current admin info
 $stmt = $conn->prepare("SELECT * FROM admins WHERE id = ?");
@@ -83,12 +84,20 @@ if ($settings_count == 0) {
 
 // Handle settings update
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!is_string($_POST['csrf_token'] ?? null) || !hash_equals($_SESSION['settings_csrf'], $_POST['csrf_token'])) { http_response_code(403); exit('Invalid settings request. Refresh and try again.'); }
     if (isset($_POST['update_settings'])) {
         $updated = 0;
-        foreach ($_POST['settings'] as $key => $value) {
+        foreach (($_POST['settings'] ?? []) as $key => $value) {
             // Sanitize based on type
-            if (isset($_POST['types'][$key])) {
-                $type = $_POST['types'][$key];
+            if (!is_string($value)) continue;
+            $typeStmt = $conn->prepare('SELECT setting_type FROM system_settings WHERE setting_key = ?');
+            $typeStmt->bind_param('s', $key);
+            $typeStmt->execute();
+            $stored = $typeStmt->get_result()->fetch_assoc();
+            $typeStmt->close();
+            if (!$stored) continue;
+            if ($stored) {
+                $type = $stored['setting_type'];
                 if ($type == 'boolean') {
                     $value = $value ? '1' : '0';
                 } elseif ($type == 'number') {
@@ -274,7 +283,7 @@ include 'includes/sidebar.php';
     </div>
     
     <!-- Settings Forms -->
-    <form method="POST" id="settingsForm">
+    <form method="POST" id="settingsForm"><input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['settings_csrf']); ?>"><fieldset <?php echo canAccess('settings', 'manage') ? '' : 'disabled'; ?>>
         <!-- General Settings Tab -->
         <div id="general-tab" class="settings-tab">
             <div class="bg-white rounded-lg shadow-md overflow-hidden">
@@ -620,7 +629,7 @@ include 'includes/sidebar.php';
                 
                 <div class="p-6">
                     <div class="space-y-4">
-                        <?php if($recent_activity->num_rows > 0): ?>
+                        <?php if(canAccess('activity') && $recent_activity->num_rows > 0): ?>
                             <?php while($log = $recent_activity->fetch_assoc()): ?>
                             <div class="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
                                 <div class="flex-shrink-0">
@@ -701,7 +710,7 @@ include 'includes/sidebar.php';
                 Save All Settings
             </button>
         </div>
-    </form>
+    </fieldset></form>
 </div>
 
 <script>

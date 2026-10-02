@@ -112,6 +112,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $paymentMethod = $_POST['payment_method'] ?? '';
             if (!isset($methodInstallments[$paymentMethod])) $errors[] = 'Select a valid payment method.';
             if (in_array($paymentMethod, ['scholarship', 'free_card'], true)) $totalAmount = 0.00;
+            $editAmounts = $_POST['edit_installment_amount'] ?? [];
+            $editDates = $_POST['edit_installment_date'] ?? [];
+            $editPaid = $_POST['edit_installment_paid'] ?? [];
+            if (!is_array($editPaid)) { $errors[] = 'Invalid payment status.'; $editPaid = []; }
+            $validatedPaid = [];
+            for ($index = 0; $index < ($methodInstallments[$paymentMethod] ?? 0); $index++) $validatedPaid[] = isset($editPaid[$index]) && $editPaid[$index] === '1' ? 1 : 0;
+            if (!is_array($editDates) || count($editDates) !== ($methodInstallments[$paymentMethod] ?? 0)) {
+                $errors[] = 'Set a date for each payment row.';
+            } else {
+                $editDates = array_values($editDates);
+                foreach ($editDates as $date) {
+                    $parsedDate = is_string($date) ? DateTime::createFromFormat('!Y-m-d', $date) : false;
+                    if (!$parsedDate || $parsedDate->format('Y-m-d') !== $date) $errors[] = 'Enter valid payment dates.';
+                }
+            }
+            $validatedAmounts = [];
+            $totalCents = 0;
+            if (!is_array($editAmounts) || count($editAmounts) !== ($methodInstallments[$paymentMethod] ?? 0)) {
+                $errors[] = 'The payment rows must match the selected method.';
+            } else {
+                foreach (array_values($editAmounts) as $value) {
+                    $amount = filter_var($value, FILTER_VALIDATE_FLOAT);
+                    if ($amount === false || !is_finite((float)$amount) || $amount < 0 || $amount > 9999999999.99 || abs($amount - round($amount, 2)) > 0.00001) {
+                        $errors[] = 'Enter valid payment row amounts with up to two decimal places.';
+                        break;
+                    }
+                    if (in_array($paymentMethod, ['scholarship', 'free_card'], true) && $amount != 0) {
+                        $errors[] = 'Scholarship and Free Card payments must be zero.';
+                        break;
+                    }
+                    $validatedAmounts[] = round($amount, 2);
+                    $totalCents += (int)round($amount * 100);
+                }
+                $totalAmount = $totalCents / 100;
+            }
             if (!$planId) $errors[] = 'Invalid payment record.';
             if ($studentName === '' || mb_strlen($studentName) > 255) $errors[] = 'Enter a student name of up to 255 characters.';
             if ($studentIdNumber === '' || mb_strlen($studentIdNumber) > 50) $errors[] = 'Enter a student ID of up to 50 characters.';
@@ -125,29 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $currentPlan = $currentStmt->get_result()->fetch_assoc();
                     $currentStmt->close();
                     if (!$currentPlan) throw new RuntimeException('Payment record no longer exists.');
-                    if ($paymentMethod !== $currentPlan['payment_method']) {
-                        updatePaymentMethodSchedule($conn, $planId, $paymentMethod, $totalAmount, $amountSettings);
-                    } elseif (round((float)$currentPlan['total_amount'] * 100) !== round($totalAmount * 100)) {
-                        $itemsStmt = $conn->prepare('SELECT id, amount FROM payment_installments WHERE payment_plan_id = ? ORDER BY installment_number FOR UPDATE');
-                        $itemsStmt->bind_param('i', $planId);
-                        $itemsStmt->execute();
-                        $items = $itemsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                        $itemsStmt->close();
-                        if (!$items) throw new RuntimeException('Payment schedule is missing.');
-                        $oldTotal = array_sum(array_column($items, 'amount'));
-                        $remainingCents = (int)round($totalAmount * 100);
-                        $newTotalCents = $remainingCents;
-                        $updateItem = $conn->prepare('UPDATE payment_installments SET amount = ? WHERE id = ?');
-                        foreach ($items as $index => $item) {
-                            $cents = $index === count($items) - 1 ? $remainingCents : (int)floor($newTotalCents * ($oldTotal > 0 ? (float)$item['amount'] / $oldTotal : 1 / count($items)));
-                            $remainingCents -= $cents;
-                            $amount = $cents / 100;
-                            $itemId = (int)$item['id'];
-                            $updateItem->bind_param('di', $amount, $itemId);
-                            $updateItem->execute();
-                        }
-                        $updateItem->close();
-                    }
+                    updatePaymentMethodSchedule($conn, $planId, $paymentMethod, $totalAmount, $amountSettings, $validatedAmounts, $editDates, $validatedPaid);
                     $studentUserId = null;
                     $lookup = $conn->prepare("SELECT id FROM users WHERE user_role = 'student' AND (user_id = ? OR CAST(id AS CHAR) = ?) LIMIT 1");
                     $lookup->bind_param('ss', $studentIdNumber, $studentIdNumber);
@@ -340,7 +353,7 @@ $sortColumns = [
     'course' => 'c.course_number',
     'method' => "CASE p.payment_method WHEN 'full' THEN 'Full Payment' WHEN 'half' THEN 'Half Payment' WHEN 'quarter' THEN 'Quarter Payment' WHEN 'scholarship' THEN 'Scholarship' WHEN 'free_card' THEN 'Free Card' END",
     'progress' => 'SUM(i.is_paid) / COUNT(i.id)',
-    'amount' => 'p.total_amount',
+    'amount' => canAccess('payments', 'amounts') ? 'p.total_amount' : 'p.student_name',
     'next_date' => 'next_due_date',
     'status' => "CASE WHEN SUM(i.is_paid) = COUNT(i.id) THEN 'Paid' WHEN MIN(CASE WHEN i.is_paid = 0 THEN i.payment_date END) < CURDATE() THEN 'Overdue' ELSE 'Pending' END",
 ];
@@ -414,10 +427,10 @@ include 'includes/sidebar.php';
             <p class="text-gray-500 mt-1">Create payment plans and track every installment date.</p>
         </div>
         <div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-            <button type="button" onclick="document.getElementById('payment-form').scrollIntoView({behavior:'smooth'})" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg w-full sm:w-auto">
+            <?php if (canAccess('payments', 'save_plan') && canAccess('payments', 'amounts')): ?><button type="button" onclick="document.getElementById('payment-form').scrollIntoView({behavior:'smooth'})" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg w-full sm:w-auto">
                 <i class="fas fa-plus mr-2"></i>New Payment
-            </button>
-            <a href="payment-reports.php" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2.5 rounded-lg text-center w-full sm:w-auto"><i class="fas fa-chart-column mr-2"></i>Reports</a>
+            </button><?php endif; ?>
+            <?php if (canAccess('reports')): ?><a href="payment-reports.php" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2.5 rounded-lg text-center w-full sm:w-auto"><i class="fas fa-chart-column mr-2"></i>Reports</a><?php endif; ?>
         </div>
     </div>
 
@@ -433,14 +446,14 @@ include 'includes/sidebar.php';
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
         <?php foreach ($methodCounts as $key => $item): ?>
-            <a href="payment-reports.php?<?php echo htmlspecialchars(http_build_query(['method' => $key, 'search' => $search, 'status' => $status])); ?>" class="bg-white rounded-xl shadow p-4 hover:bg-blue-50">
+            <?php if (canAccess('reports')): ?><a href="payment-reports.php?<?php echo htmlspecialchars(http_build_query(['method' => $key, 'search' => $search, 'status' => $status])); ?>" class="bg-white rounded-xl shadow p-4 hover:bg-blue-50">
                 <p class="text-sm text-gray-500"><?php echo htmlspecialchars($item['label']); ?></p><p class="text-2xl font-bold text-gray-800"><?php echo $item['plans']; ?></p><p class="text-xs text-gray-500">Payment plans · View report</p>
-            </a>
+            </a><?php endif; ?>
         <?php endforeach; ?>
     </div>
     <p class="text-xs text-gray-500 mb-6">Method counts follow the payment records search and status filters.</p>
 
-    <section id="payment-amount-settings" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6 scroll-mt-6">
+    <?php if (canAccess('payments', 'central') && canAccess('payments', 'amounts')): ?><section id="payment-amount-settings" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6 scroll-mt-6">
         <h2 class="text-xl font-semibold text-gray-800">Central Payment Amounts</h2>
         <p class="text-sm text-gray-500 mt-1 mb-4">Customize amounts here for all courses. Saving updates existing student totals and installments, including paid installments and individually edited amounts. Dates and paid status stay the same.</p>
         <form method="POST" class="space-y-4">
@@ -456,7 +469,7 @@ include 'includes/sidebar.php';
             <p class="text-sm text-gray-500">Half total: Rs. <?php echo number_format($amountSettings['half_first'] + $amountSettings['half_second'], 2); ?> · Quarter total: Rs. <?php echo number_format($amountSettings['quarter_each'] * 3, 2); ?></p>
             <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg">Save &amp; Update Student Payments</button>
         </form>
-    </section>
+    </section><?php endif; ?>
 
     <section class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -464,13 +477,13 @@ include 'includes/sidebar.php';
                 <h2 class="text-xl font-semibold text-gray-800">Create Course</h2>
                 <p class="text-sm text-gray-500 mt-1">Create each course once. It will then remain available in the payment form.</p>
             </div>
-            <form method="POST" class="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-3 w-full lg:max-w-3xl">
+            <?php if (canAccess('payments', 'codes')): ?><form method="POST" class="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-3 w-full lg:max-w-3xl">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
                 <input type="hidden" name="action" value="create_course">
                 <input name="course_number" required maxlength="50" class="border rounded-lg px-4 py-2.5" placeholder="Course number">
                 <input name="course_name" required maxlength="255" class="border rounded-lg px-4 py-2.5" placeholder="Course name">
                 <button class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg whitespace-nowrap"><i class="fas fa-plus mr-2"></i>Create Course</button>
-            </form>
+            </form><?php endif; ?>
         </div>
         <?php if ($courses): ?>
             <div class="border-t mt-5 pt-5">
@@ -479,14 +492,14 @@ include 'includes/sidebar.php';
                     <?php foreach ($courses as $course): ?>
                         <div class="inline-flex items-center gap-2 rounded-lg border bg-gray-50 pl-3 pr-1 py-1">
                             <span class="text-sm text-gray-700"><strong><?php echo htmlspecialchars($course['course_number']); ?></strong> — <?php echo htmlspecialchars($course['course_name']); ?></span>
-                            <form method="POST" onsubmit="return confirm('Delete this course? This cannot be undone.');">
+                            <?php if (canAccess('payments', 'codes')): ?><form method="POST" onsubmit="return confirm('Delete this course? This cannot be undone.');">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
                                 <input type="hidden" name="action" value="delete_course">
                                 <input type="hidden" name="course_id" value="<?php echo (int)$course['id']; ?>">
                                 <button type="submit" class="w-8 h-8 rounded-md text-red-500 hover:text-white hover:bg-red-600" title="Delete course" aria-label="Delete <?php echo htmlspecialchars($course['course_name']); ?>">
                                     <i class="fas fa-trash-can"></i>
                                 </button>
-                            </form>
+                            </form><?php endif; ?>
                         </div>
                     <?php endforeach; ?>
                 </div>
@@ -495,7 +508,7 @@ include 'includes/sidebar.php';
         <?php endif; ?>
     </section>
 
-    <section id="payment-form" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-8">
+    <?php if (canAccess('payments', 'save_plan') && canAccess('payments', 'amounts')): ?><section id="payment-form" class="bg-white rounded-xl shadow-md p-4 sm:p-6 mb-8">
         <div class="flex items-center justify-between mb-6">
             <div><h2 class="text-xl font-semibold text-gray-800">Create Payment Plan</h2><p class="text-sm text-gray-500 mt-1">Installments are generated from the payment method.</p></div>
             <div class="hidden sm:flex w-11 h-11 rounded-full bg-blue-100 text-blue-600 items-center justify-center"><i class="fas fa-receipt"></i></div>
@@ -558,7 +571,7 @@ include 'includes/sidebar.php';
                 <button class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg"><i class="fas fa-floppy-disk mr-2"></i>Save Payment Plan</button>
             </div>
         </form>
-    </section>
+    </section><?php endif; ?>
 
     <section id="payment-records" class="bg-white rounded-xl shadow-md overflow-hidden scroll-mt-6">
         <div class="p-4 sm:p-6 border-b">
@@ -607,17 +620,17 @@ include 'includes/sidebar.php';
                                 <?php foreach ($installmentsByPlan[$plan['id']] ?? [] as $item): ?>
                                     <form method="POST" class="flex items-center justify-between gap-3 rounded-lg border p-2 bg-white">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>"><input type="hidden" name="action" value="toggle_installment"><input type="hidden" name="installment_id" value="<?php echo (int)$item['id']; ?>"><input type="hidden" name="is_paid" value="<?php echo $item['is_paid'] ? '0' : '1'; ?>"><input type="hidden" name="return_query" value="<?php echo htmlspecialchars(http_build_query(array_merge($recordQuery, ['open_plan' => (int)$plan['id']]))); ?>"><input type="hidden" name="return_anchor" value="payment-plan-<?php echo (int)$plan['id']; ?>">
-                                        <div><p class="text-xs font-semibold">Payment <?php echo (int)$item['installment_number']; ?> · <?php echo date('M j, Y', strtotime($item['payment_date'])); ?></p><p class="text-xs text-gray-500">Rs. <?php echo number_format((float)$item['amount'], 2); ?></p></div>
-                                        <button class="text-xs px-2 py-1 rounded <?php echo $item['is_paid'] ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'; ?>"><?php echo $item['is_paid'] ? 'Paid ✓' : 'Mark paid'; ?></button>
+                                        <div><p class="text-xs font-semibold">Payment <?php echo (int)$item['installment_number']; ?> · <?php echo date('M j, Y', strtotime($item['payment_date'])); ?></p><p class="text-xs text-gray-500">Rs. <?php echo displayAmount((float)$item['amount']); ?></p></div>
+                                        <?php if (canAccess('payments', 'apply')): ?><button class="text-xs px-2 py-1 rounded <?php echo $item['is_paid'] ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'; ?>"><?php echo $item['is_paid'] ? 'Paid ✓' : 'Mark paid'; ?></button><?php endif; ?>
                                     </form>
                                 <?php endforeach; ?>
                             </div></details></td>
-                            <td class="px-6 py-4 text-sm"><p class="font-medium">Rs. <?php echo number_format((float)$plan['paid_amount'], 2); ?></p><p class="text-gray-500">of Rs. <?php echo number_format((float)$plan['total_amount'], 2); ?></p></td>
+                            <td class="px-6 py-4 text-sm"><p class="font-medium">Rs. <?php echo displayAmount((float)$plan['paid_amount']); ?></p><p class="text-gray-500">of Rs. <?php echo displayAmount((float)$plan['total_amount']); ?></p></td>
                             <td class="px-6 py-4 text-sm text-gray-700"><?php echo $plan['next_due_date'] ? date('M j, Y', strtotime($plan['next_due_date'])) : '—'; ?></td>
                             <td class="px-6 py-4"><?php if ($complete): ?><span class="px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">Paid</span><?php elseif ($overdue): ?><span class="px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">Overdue</span><?php else: ?><span class="px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-700 text-xs font-semibold">Pending</span><?php endif; ?></td>
                             <td class="px-6 py-4 text-right">
                                 <div class="flex items-center justify-end gap-2 whitespace-nowrap">
-                                <button type="button" class="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 text-sm" onclick="document.getElementById('edit-payment-<?php echo (int)$plan['id']; ?>').showModal()"><i class="fas fa-pen" aria-hidden="true"></i>Edit</button>
+                                <?php if (canAccess('payments', 'edit_student') && canAccess('payments', 'amounts')): ?><button type="button" class="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 text-sm" onclick="document.getElementById('edit-payment-<?php echo (int)$plan['id']; ?>').showModal()"><i class="fas fa-pen" aria-hidden="true"></i>Edit</button>
                                 <dialog id="edit-payment-<?php echo (int)$plan['id']; ?>" class="payment-edit-dialog rounded-xl shadow-xl p-0 text-left" data-reopen="<?php echo $errors && ($_POST['action'] ?? '') === 'edit_student' && (int)($_POST['payment_plan_id'] ?? 0) === (int)$plan['id'] ? '1' : '0'; ?>" aria-labelledby="edit-payment-title-<?php echo (int)$plan['id']; ?>">
                                     <form method="POST" class="space-y-4 p-6 bg-white">
                                         <div class="flex items-center justify-between gap-4">
@@ -646,17 +659,35 @@ include 'includes/sidebar.php';
                                                 <?php endforeach; ?>
                                             </select>
                                         </label>
+                                        <div class="edit-payment-rows space-y-3">
+                                            <h3 class="text-sm font-semibold text-gray-800">Student Payments</h3>
+                                            <?php $editItems = $installmentsByPlan[$plan['id']] ?? []; ?>
+                                            <?php for ($index = 0; $index < ($methodInstallments[$editMethod] ?? 0); $index++):
+                                                $editAmount = $editingThisPlan ? ($_POST['edit_installment_amount'][$index] ?? '0.00') : ($editItems[$index]['amount'] ?? '0.00');
+                                            ?>
+                                                <div class="rounded-lg border bg-gray-50 p-3 text-sm font-medium text-gray-700">
+                                                    <p><?php echo htmlspecialchars($methodLabels[$editMethod]); ?> — Payment <?php echo $index + 1; ?></p>
+                                                    <label class="block text-xs mt-2">Amount (Rs.)
+                                                    <input type="number" name="edit_installment_amount[]" required min="0" max="9999999999.99" step="0.01" <?php echo in_array($editMethod, ['scholarship', 'free_card'], true) ? 'readonly' : ''; ?> value="<?php echo htmlspecialchars((string)$editAmount); ?>" class="mt-2 w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                                                    </label>
+                                                    <label class="block text-xs mt-2">Payment date
+                                                        <input type="date" name="edit_installment_date[]" required value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['edit_installment_date'][$index] ?? '') : ($editItems[$index]['payment_date'] ?? (new DateTime($editItems[0]['payment_date'] ?? date('Y-m-d')))->modify('+' . $index . ' month')->format('Y-m-d'))); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 bg-white">
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-sm mt-3"><input type="checkbox" role="switch" name="edit_installment_paid[<?php echo $index; ?>]" value="1" <?php echo ($editingThisPlan ? isset($_POST['edit_installment_paid'][$index]) : ($editItems[$index]['is_paid'] ?? false)) ? 'checked' : ''; ?>>Paid (On) / Unpaid (Off)</label>
+                                                </div>
+                                            <?php endfor; ?>
+                                        </div>
                                         <label class="block text-xs font-medium text-gray-700">Total Amount (Rs.)
-                                            <input type="number" name="total_amount" required min="0" max="9999999999.99" step="0.01" <?php echo in_array($editMethod, ['scholarship', 'free_card'], true) ? 'readonly' : ''; ?> value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['total_amount'] ?? '') : $plan['total_amount']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm">
+                                            <input type="number" name="total_amount" readonly required min="0" max="9999999999.99" step="0.01" value="<?php echo htmlspecialchars($editingThisPlan ? ($_POST['total_amount'] ?? '') : $plan['total_amount']); ?>" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm bg-gray-100">
                                         </label>
-                                        <p class="text-xs text-gray-500">Changing the method fills the central amount and changes the schedule to 1, 2, or 3 payments. Existing installment dates and paid status are kept where possible; new installments start unpaid. Paid installments cannot be removed. Scholarship and Free Card amounts are zero.</p>
+                                        <p class="text-xs text-gray-500">Customize each amount, date, and paid status. The total is calculated automatically. On means paid; Off means unpaid. Changing the method fills central defaults. Paid installments cannot be removed. Saving central amounts later replaces custom amounts.</p>
                                         <div class="flex justify-end gap-2 pt-2">
                                             <button type="button" onclick="this.closest('dialog').close()" class="text-gray-600 px-3 py-2 text-sm">Cancel</button>
                                             <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">Save Changes</button>
                                         </div>
                                     </form>
-                                </dialog>
-                                <form method="POST" onsubmit="return confirm('Delete this complete payment record and all installment rows? This cannot be undone.');">
+                                </dialog><?php endif; ?>
+                                <?php if (canAccess('payments', 'delete_student')): ?><form method="POST" onsubmit="return confirm('Delete this complete payment record and all installment rows? This cannot be undone.');">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['payment_csrf_token']); ?>">
                                     <input type="hidden" name="action" value="delete_payment">
                                     <input type="hidden" name="payment_plan_id" value="<?php echo (int)$plan['id']; ?>">
@@ -664,7 +695,7 @@ include 'includes/sidebar.php';
                                     <button type="submit" class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-red-50 text-red-600 hover:bg-red-600 hover:text-white" title="Delete payment record" aria-label="Delete payment record for <?php echo htmlspecialchars($plan['student_name']); ?>">
                                         <i class="fas fa-trash-can"></i>
                                     </button>
-                                </form>
+                                </form><?php endif; ?>
                                 </div>
                             </td>
                         </tr>
@@ -689,24 +720,65 @@ include 'includes/sidebar.php';
     text-align: left;
 }
 .payment-edit-dialog form { min-width: 0; }
-.payment-edit-dialog input, .payment-edit-dialog select { display: block; min-width: 0; max-width: 100%; }
+.payment-edit-dialog input:not([type="checkbox"]), .payment-edit-dialog select { display: block; min-width: 0; max-width: 100%; }
 .payment-edit-dialog h2 { min-width: 0; }
 .payment-edit-dialog button { flex-shrink: 0; }
 .payment-edit-dialog::backdrop { background: rgba(15, 23, 42, 0.55); }
 </style>
 <script>
 (() => {
-    const amountSettings = <?php echo json_encode(array_map('floatval', $amountSettings)); ?>;
+    const amountSettings = <?php echo json_encode(canAccess('payments', 'amounts') ? array_map('floatval', $amountSettings) : (object)[]); ?>;
+    if (!<?php echo canAccess('payments', 'amounts') ? 'true' : 'false'; ?>) return;
     const schedules = {full: [amountSettings.full_amount], half: [amountSettings.half_first, amountSettings.half_second], quarter: Array(3).fill(amountSettings.quarter_each), scholarship: [0], free_card: [0]};
     const submittedSchedule = <?php echo json_encode(($_POST['action'] ?? '') === 'create' ? ['dates' => $_POST['installment_date'] ?? [], 'amounts' => $_POST['installment_amount'] ?? [], 'paid' => (object)($_POST['installment_paid'] ?? [])] : null, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     document.querySelectorAll('.payment-edit-dialog').forEach(dialog => {
         const editMethod = dialog.querySelector('.edit-payment-method');
         const editTotal = dialog.querySelector('input[name="total_amount"]');
+        const editRows = dialog.querySelector('.edit-payment-rows');
+        function updateEditTotal() {
+            const cents = [...editRows.querySelectorAll('input[type="number"]')].reduce((sum, input) => sum + Math.round((parseFloat(input.value) || 0) * 100), 0);
+            editTotal.value = (cents / 100).toFixed(2);
+        }
+        editRows.addEventListener('input', updateEditTotal);
         editMethod.addEventListener('change', () => {
-            editTotal.value = schedules[editMethod.value].reduce((sum, amount) => sum + amount, 0).toFixed(2);
-            editTotal.readOnly = ['scholarship', 'free_card'].includes(editMethod.value);
-            editTotal.classList.toggle('bg-gray-100', editTotal.readOnly);
+            const free = ['scholarship', 'free_card'].includes(editMethod.value);
+            const label = editMethod.options[editMethod.selectedIndex].textContent;
+            const previousDates = [...editRows.querySelectorAll('input[type="date"]')].map(input => input.value);
+            const previousPaid = [...editRows.querySelectorAll('input[type="checkbox"]')].map(input => input.checked);
+            editRows.replaceChildren();
+            const heading = document.createElement('h3');
+            heading.className = 'text-sm font-semibold text-gray-800';
+            heading.textContent = 'Student Payments';
+            editRows.append(heading);
+            schedules[editMethod.value].forEach((amount, index) => {
+                const row = document.createElement('div');
+                row.className = 'block rounded-lg border bg-gray-50 p-3 text-sm font-medium text-gray-700';
+                row.textContent = `${label} — Payment ${index + 1}`;
+                const input = document.createElement('input');
+                Object.assign(input, {type: 'number', name: 'edit_installment_amount[]', min: '0', max: '9999999999.99', step: '0.01', required: true, readOnly: free, value: amount.toFixed(2), className: 'mt-2 w-full border rounded-lg px-3 py-2 text-sm bg-white'});
+                const amountLabel = document.createElement('label');
+                amountLabel.className = 'block text-xs mt-2';
+                amountLabel.textContent = 'Amount (Rs.)';
+                amountLabel.append(input); row.append(amountLabel);
+                const dateLabel = document.createElement('label');
+                dateLabel.className = 'block text-xs mt-3';
+                dateLabel.textContent = 'Payment date';
+                const dateInput = document.createElement('input');
+                const fallback = new Date((previousDates[0] || localDate()) + 'T12:00:00');
+                fallback.setMonth(fallback.getMonth() + index);
+                Object.assign(dateInput, {type: 'date', name: 'edit_installment_date[]', required: true, value: previousDates[index] || fallback.toLocaleDateString('en-CA'), className: 'mt-1 w-full border rounded-lg px-3 py-2 bg-white'});
+                dateLabel.append(dateInput); row.append(dateLabel);
+                const paidLabel = document.createElement('label');
+                paidLabel.className = 'flex items-center gap-2 text-sm mt-3';
+                const paidInput = document.createElement('input');
+                Object.assign(paidInput, {type: 'checkbox', name: `edit_installment_paid[${index}]`, value: '1', checked: !!previousPaid[index]});
+                paidInput.setAttribute('role', 'switch');
+                paidLabel.append(paidInput, document.createTextNode('Paid (On) / Unpaid (Off)')); row.append(paidLabel);
+                editRows.append(row);
+            });
+            updateEditTotal();
         });
+        updateEditTotal();
         dialog.addEventListener('click', event => {
             const bounds = dialog.getBoundingClientRect();
             if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
@@ -758,6 +830,7 @@ include 'includes/sidebar.php';
             }
         });
     }
+    if (!method) return;
     method.addEventListener('change', () => renderSchedule(true));
     total.addEventListener('input', () => renderSchedule(false));
     document.getElementById('student_name').addEventListener('change', event => {

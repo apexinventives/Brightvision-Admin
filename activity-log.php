@@ -1,7 +1,7 @@
 <?php
 require_once 'config/session.php';
 require_once 'config/database.php';
-redirectIfNotAdmin();
+redirectIfNotLoggedIn();
 
 $conn = getConnection();
 

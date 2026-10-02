@@ -4,7 +4,7 @@ require_once 'config/database.php';
 redirectIfNotLoggedIn();
 
 $conn = getConnection();
-$user_id = isset($_GET['id']) ? $_GET['id'] : 0;
+$user_id = (int)($_GET['id'] ?? 0);
 $message = '';
 $error = '';
 

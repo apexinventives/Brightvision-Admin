@@ -1,12 +1,14 @@
 <?php
 session_start();
+require_once __DIR__ . '/permissions.php';
 
 function isLoggedIn() {
     return isset($_SESSION['user_id']);
 }
 
 function isAdmin() {
-    return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
+    $account = currentAccount();
+    return $account && $account['is_active'] && $account['role'] === 'admin';
 }
 
 function redirectIfNotLoggedIn() {
@@ -14,13 +16,20 @@ function redirectIfNotLoggedIn() {
         header('Location: login.php');
         exit();
     }
+    $account = currentAccount();
+    if (!$account || !$account['is_active']) {
+        $_SESSION = [];
+        session_destroy();
+        header('Location: login.php');
+        exit();
+    }
+    enforcePagePermission();
 }
 
 function redirectIfNotAdmin() {
     redirectIfNotLoggedIn();
     if (!isAdmin()) {
-        header('Location: index.php');
-        exit();
+        denyPermission();
     }
 }
 

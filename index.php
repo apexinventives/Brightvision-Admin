@@ -3,6 +3,14 @@ require_once 'config/session.php';
 require_once 'config/database.php';
 redirectIfNotLoggedIn();
 
+if (!canAccess('dashboard')) {
+    include 'includes/header.php';
+    include 'includes/sidebar.php';
+    echo '<div class="p-4 sm:p-6 lg:p-8"><h1 class="text-3xl font-bold text-gray-800">Welcome, ' . htmlspecialchars($_SESSION['user_name']) . '</h1><p class="text-gray-500 mt-3">Use the navigation menu to open your permitted sections. Contact an administrator to change your access.</p></div>';
+    include 'includes/footer.php';
+    exit;
+}
+
 $conn = getConnection();
 
 // Get statistics
@@ -40,7 +48,8 @@ include 'includes/sidebar.php';
     
     <!-- Statistics Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <!-- Total Students -->
+        <?php if (canAccess('dashboard', 'students') && canAccess('students')): ?>
+<!-- Total Students -->
         <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-blue-500">
             <div class="flex items-center justify-between">
                 <div>
@@ -53,8 +62,10 @@ include 'includes/sidebar.php';
             </div>
             <a href="users.php" class="text-sm text-blue-500 hover:text-blue-700 mt-2 inline-block">View all →</a>
         </div>
+<?php endif; ?>
         
-        <!-- Total Reservations -->
+        <?php if (canAccess('dashboard', 'reservations') && canAccess('reservations')): ?>
+<!-- Total Reservations -->
         <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-green-500">
             <div class="flex items-center justify-between">
                 <div>
@@ -67,8 +78,10 @@ include 'includes/sidebar.php';
             </div>
             <a href="reservations.php" class="text-sm text-green-500 hover:text-green-700 mt-2 inline-block">View all →</a>
         </div>
+<?php endif; ?>
         
-        <!-- Pending Approvals -->
+        <?php if (canAccess('dashboard', 'pending') && canAccess('reservations')): ?>
+<!-- Pending Approvals -->
         <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-yellow-500">
             <div class="flex items-center justify-between">
                 <div>
@@ -81,8 +94,10 @@ include 'includes/sidebar.php';
             </div>
             <a href="reservations.php?filter=pending" class="text-sm text-yellow-500 hover:text-yellow-700 mt-2 inline-block">Review →</a>
         </div>
+<?php endif; ?>
         
-        <!-- Today's Exams -->
+        <?php if (canAccess('dashboard', 'exams') && canAccess('reservations')): ?>
+<!-- Today's Exams -->
         <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-purple-500">
             <div class="flex items-center justify-between">
                 <div>
@@ -95,11 +110,13 @@ include 'includes/sidebar.php';
             </div>
             <a href="reservations.php?filter=today" class="text-sm text-purple-500 hover:text-purple-700 mt-2 inline-block">View schedule →</a>
         </div>
+<?php endif; ?>
     </div>
     
     <!-- Charts Section -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <!-- Monthly Registrations -->
+        <?php if (canAccess('dashboard', 'registrations') && canAccess('students')): ?>
+<!-- Monthly Registrations -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4">Monthly Registrations</h2>
             <div class="h-64 flex items-end space-x-2">
@@ -115,8 +132,10 @@ include 'includes/sidebar.php';
                 ?>
             </div>
         </div>
+<?php endif; ?>
         
-        <!-- Class Distribution -->
+        <?php if (canAccess('dashboard', 'classes') && canAccess('students')): ?>
+<!-- Class Distribution -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4">Students by Class</h2>
             <?php
@@ -139,11 +158,13 @@ include 'includes/sidebar.php';
             }
             ?>
         </div>
+<?php endif; ?>
     </div>
     
     <!-- Recent Tables -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Recent Students -->
+        <?php if (canAccess('dashboard', 'recent_students') && canAccess('students')): ?>
+<!-- Recent Students -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-lg font-semibold text-gray-800">Recent Students</h2>
@@ -170,8 +191,10 @@ include 'includes/sidebar.php';
                 </table>
             </div>
         </div>
+<?php endif; ?>
         
-        <!-- Recent Reservations -->
+        <?php if (canAccess('dashboard', 'recent_reservations') && canAccess('reservations')): ?>
+<!-- Recent Reservations -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-lg font-semibold text-gray-800">Recent Reservations</h2>
@@ -204,6 +227,7 @@ include 'includes/sidebar.php';
                 </table>
             </div>
         </div>
+<?php endif; ?>
     </div>
 </div>
 
